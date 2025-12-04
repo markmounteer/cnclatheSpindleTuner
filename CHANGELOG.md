@@ -1,0 +1,207 @@
+# Spindle Tuner v6.0 - Round 17 Bug Fixes
+
+## Summary
+
+This round fixed **5 confirmed bugs** identified with verifiable evidence from config.py.
+
+---
+
+# Spindle Tuner v6.0 - Round 18 export.py Improvements
+
+## Proposal Review
+
+**Proposed rewrite**: ~450 lines (+80% increase)
+**Accepted improvements**: +86 lines (+34% increase)
+
+### Breaking Change Identified
+
+The proposal called `self.logger.export_csv(path, metadata=metadata, overwrite=overwrite)` but logger.py's `export_csv()` only accepts `filepath` - this would crash at runtime.
+
+### Over-Engineering Rejected
+
+| Feature | Lines | Reason |
+|---------|-------|--------|
+| `Profile` dataclass with schema versioning | ~50 | Simple JSON doesn't need migration |
+| `ProfileStore` class | ~40 | Unnecessary abstraction |
+| `_sanitize_profile_stem()` regex | ~10 | `replace(' ', '_')` is sufficient |
+| Atomic writes via tempfile | ~15 | Marginal benefit for small files |
+| logging module integration | ~10 | Console print is sufficient |
+
+### Improvements Accepted
+
+| Feature | Benefit |
+|---------|---------|
+| Recording button text sync | Shows "Resume" when paused, "Pause" when recording |
+| Better profile list display | Shows "name — date" instead of just filename |
+| "Load Selected" button | Explicit button in addition to double-click |
+| "Open Folder" button | Quick access to profiles directory |
+| Confirmation before loading | Prevents accidental parameter changes |
+| Filter unknown parameters | Only applies params that exist in BASELINE_PARAMS |
+| Save to File in INI dialog | Useful complement to Copy to Clipboard |
+| Path tracking for profiles | Fixes Load Selected for new display format |
+
+## Files Modified
+
+- `export.py`: 251 → 338 lines (+87)
+
+## Implementation Details
+
+### Recording Button Sync
+```python
+# Now updates button text to match state
+self.btn_record_toggle.config(text="Resume")  # when paused
+self.btn_record_toggle.config(text="Pause")   # when recording
+```
+
+### Profile List Display
+```python
+# Before: just filename
+"Conservative_20241201_143022.json"
+
+# After: name + date
+"Conservative — 2024-12-01 14:30"
+```
+
+### Profile Loading Confirmation
+```python
+msg = f"Load profile '{name}'?\n\n"
+msg += f"Parameters: {len(known_params)}\n"
+msg += f"Created: {profile.get('timestamp', 'Unknown')}\n\n"
+msg += "This will update the current tuning parameters."
+
+if not messagebox.askyesno("Load Profile", msg):
+    return
+```
+
+### Unknown Parameter Filtering
+```python
+# Only apply parameters that exist in BASELINE_PARAMS
+known_params = {k: v for k, v in params.items() if k in BASELINE_PARAMS}
+```
+
+## Verification
+
+- Syntax check: `python3 -m py_compile export.py` ✓
+- Line count: 338 lines (+87 from 251)
+
+## Design Principles Followed
+
+1. ✓ **Targeted improvements** - No full rewrite
+2. ✓ **Minimal additions** - +86 lines vs proposed +200
+3. ✓ **No breaking changes** - Doesn't change logger.py API
+4. ✓ **Practical UX wins** - Button sync, confirmation, folder access
+
+
+## Files Modified
+
+- `config.py`: 1 change (-1 line net due to comment change)
+- `dashboard.py`: 5 changes (+11 lines, 1326 → 1337)
+
+## Bug Fixes Applied
+
+### 1. Plot Time Scale vs Buffer Mismatch (config.py)
+
+**Problem**: Dashboard offers time scales up to 120s (line 64: `TIME_SCALE_OPTIONS = [10, 30, 60, 120]`), but `HISTORY_DURATION_S = 30` means data for 60s and 120s views doesn't exist.
+
+**Fix**:
+```python
+# Before
+HISTORY_DURATION_S = 30   # Data buffer duration
+
+# After  
+HISTORY_DURATION_S = 120  # Data buffer duration (must cover max plot time scale)
+```
+
+### 2. Wrong Key for Safety Chain Status (dashboard.py)
+
+**Problem**: Dashboard used `'external_ok'` key, but config.py defines `'safety_chain': 'external-ok'`. Result: status indicator always showed default value.
+
+**Fix**: Changed indicator setup and update to use `'safety_chain'`:
+- Line 329: `('external_ok', ...)` → `('safety_chain', ...)`
+- Line 1170: `values.get('external_ok', 1)` → `values.get('safety_chain', 1.0)`
+- Line 1180: `status_indicators['external_ok']` → `status_indicators['safety_chain']`
+
+### 3. Direction Indicator Using Wrong Feedback (dashboard.py)
+
+**Problem**: Direction detection used `values.get('feedback', 0)` which maps to `pid.s.feedback` - this is post-ABS and always positive, so CCW never displayed.
+
+**Fix**: Use signed `feedback_raw` for direction logic:
+```python
+# Before
+if abs(fb) < 10:
+    self.lbl_direction.config(text="STOP", ...)
+elif fb > 0:
+    self.lbl_direction.config(text="CW →", ...)
+
+# After
+fb_raw = values.get('feedback_raw', fb)
+if abs(fb_raw) < 10:
+    self.lbl_direction.config(text="STOP", ...)
+elif fb_raw > 0:
+    self.lbl_direction.config(text="CW →", ...)
+```
+
+### 4. Double HAL Writes (dashboard.py)
+
+**Problem**: When `live_apply=True`, `_on_slider_change()` called BOTH:
+- `self.hal.set_param(param_name, val)` directly
+- `self.on_param_change(param_name, val)` which in main.py also calls `hal.set_param()`
+
+Result: Every slider change wrote to HAL twice.
+
+**Fix**: Only call callback when NOT live applying:
+```python
+# Before
+if self.live_apply.get():
+    self.hal.set_param(param_name, val)
+if self.on_param_change:
+    self.on_param_change(param_name, val)
+
+# After
+if self.live_apply.get():
+    self.hal.set_param(param_name, val)
+elif self.on_param_change:  # Only callback when not live applying
+    self.on_param_change(param_name, val)
+```
+
+### 5. UI Slider Values Not Snapped to Step (dashboard.py)
+
+**Problem**: HAL's `_clamp_and_snap()` (Round 13) produces clean values like 0.05, 0.10, 0.15. But UI displayed/set unsnapped values like 0.0523, causing "what you see ≠ what you set" confusion.
+
+**Fix**: Added `_snap_param()` helper matching HAL behavior:
+```python
+def _snap_param(self, param_name: str, value: float) -> float:
+    """Snap parameter value to configured step (matches HAL's _clamp_and_snap)."""
+    _, _, min_val, max_val, step, _, _ = TUNING_PARAMS[param_name]
+    v = max(min_val, min(max_val, value))
+    if step and step > 0:
+        steps = round((v - min_val) / step)
+        v = min_val + steps * step
+        v = max(min_val, min(max_val, v))
+    return v
+```
+
+Used in:
+- `_on_slider_change()`: Snap before display/HAL write
+- `_edit_param_value()`: Snap typed values
+
+## Verification
+
+All changes verified with `python3 -m py_compile`:
+- config.py: Syntax OK (212 lines)
+- dashboard.py: Syntax OK (1337 lines, +11 from 1326)
+
+## Statistics
+
+| File | Original | Updated | Delta |
+|------|----------|---------|-------|
+| config.py | 213 | 212 | -1 |
+| dashboard.py | 1326 | 1337 | +11 |
+| **Total** | 1539 | 1549 | **+10** |
+
+## Design Principles Followed
+
+1. ✓ **Fix real bugs** - All issues had verifiable evidence from config.py
+2. ✓ **Minimal changes** - Only touched lines necessary for fixes
+3. ✓ **Consistency** - UI snapping matches HAL `_clamp_and_snap()` from Round 13
+4. ✓ **No new features** - Pure bug fixes, no scope creep
