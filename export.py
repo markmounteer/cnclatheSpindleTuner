@@ -12,10 +12,11 @@ This module provides:
 - Profile management with deletion and refresh capabilities
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import re
-from dataclasses import dataclass
 
 try:
     import tkinter as tk
@@ -48,15 +49,6 @@ class ProfileData(TypedDict, total=False):
     timestamp: str
     params: Dict[str, float]
     notes: str
-
-
-@dataclass
-class ParsedProfile:
-    """Parsed profile information for display."""
-    name: str
-    timestamp: Optional[datetime]
-    display_text: str
-    path: Path
 
 
 class ExportTab:
@@ -110,9 +102,36 @@ class ExportTab:
         self.set_params = set_params_callback
         self._max_profiles = max_profiles
         self._profile_paths: List[Path] = []
+        self._profiles_dir = Path(PROFILES_DIR)
+
+        self._validate_dependencies()
 
         self._setup_ui()
         self._refresh_profiles_list()
+
+    def _validate_dependencies(self) -> None:
+        """Ensure the provided collaborators expose the expected API."""
+        required_logger_attrs = {
+            "recording": None,
+            "set_recording": callable,
+            "clear_recording": callable,
+            "get_point_count": callable,
+            "export_csv": callable,
+        }
+
+        missing = []
+        for attr, validator in required_logger_attrs.items():
+            value = getattr(self.data_logger, attr, None)
+            if value is None or (validator and not validator(value)):
+                missing.append(attr)
+
+        if missing:
+            raise TypeError(
+                "data_logger is missing required attributes: " + ", ".join(sorted(missing))
+            )
+
+        if not hasattr(self.ini_handler, "generate_ini_section"):
+            raise TypeError("ini_handler must provide generate_ini_section(params)")
     
     def _setup_ui(self) -> None:
         """Build export tab UI with all control sections."""
@@ -149,6 +168,8 @@ class ExportTab:
 
         self.points_label = ttk.Label(row, text="Points: 0")
         self.points_label.pack(side=tk.RIGHT, padx=10)
+
+        self._sync_recording_ui()
 
     def _setup_export_options(self) -> None:
         """Setup export buttons for CSV and INI generation."""
@@ -196,19 +217,30 @@ class ExportTab:
         ttk.Button(
             frame, text="Refresh", command=self._refresh_profiles_list
         ).pack(pady=5)
+
+    def _parent_window(self) -> tk.Misc:
+        """Return the top-level window for parenting dialogs."""
+        return self.parent.winfo_toplevel()
+
+    def _sync_recording_ui(self) -> None:
+        """Align UI labels and buttons with the logger recording state."""
+        is_recording = bool(getattr(self.data_logger, "recording", False))
+        if is_recording:
+            self.rec_status.config(text="● Recording", foreground="green")
+            self.btn_record_toggle.config(text="Pause")
+        else:
+            self.rec_status.config(text="● Paused", foreground="orange")
+            self.btn_record_toggle.config(text="Resume")
+        self.update_points_display()
     
     def toggle_recording(self) -> None:
         """Toggle data recording on/off and update UI status."""
         if self.data_logger.recording:
             self.data_logger.set_recording(False)
-            self.rec_status.config(text="● Paused", foreground="orange")
-            self.btn_record_toggle.config(text="Resume")
-            logger.info("Recording paused")
         else:
             self.data_logger.set_recording(True)
-            self.rec_status.config(text="● Recording", foreground="green")
-            self.btn_record_toggle.config(text="Pause")
-            logger.info("Recording resumed")
+        self._sync_recording_ui()
+        logger.info("Recording %s", "resumed" if self.data_logger.recording else "paused")
 
     def clear_data(self) -> None:
         """Clear all recorded data and update display."""
@@ -229,12 +261,17 @@ class ExportTab:
         Shows success/error message based on export result.
         """
         if self.data_logger.get_point_count() == 0:
-            messagebox.showwarning("No Data", "No data recorded to export.")
+            messagebox.showwarning(
+                "No Data",
+                "No data recorded to export.",
+                parent=self._parent_window(),
+            )
             return
 
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         filename = f"spindle_data_{timestamp}.csv"
         filepath = filedialog.asksaveasfilename(
+            parent=self._parent_window(),
             defaultextension=".csv",
             filetypes=[("CSV files", "*.csv")],
             initialfile=filename
@@ -243,11 +280,15 @@ class ExportTab:
         if filepath:
             try:
                 self.data_logger.export_csv(Path(filepath))
-                messagebox.showinfo("Success", f"Data exported to:\n{filepath}")
+                messagebox.showinfo(
+                    "Success", f"Data exported to:\n{filepath}", parent=self._parent_window()
+                )
                 logger.info(f"CSV exported to {filepath}")
             except (OSError, PermissionError) as e:
                 logger.error(f"CSV export failed: {e}")
-                messagebox.showerror("Error", f"Export failed:\n{e}")
+                messagebox.showerror(
+                    "Error", f"Export failed:\n{e}", parent=self._parent_window()
+                )
 
     def show_ini_config(self) -> None:
         """
@@ -260,7 +301,11 @@ class ExportTab:
             ini_text = self.ini_handler.generate_ini_section(params)
         except Exception as e:
             logger.error(f"Failed to generate INI configuration: {e}")
-            messagebox.showerror("Error", f"Failed to generate INI configuration:\n{e}")
+            messagebox.showerror(
+                "Error",
+                f"Failed to generate INI configuration:\n{e}",
+                parent=self._parent_window(),
+            )
             return
 
         dialog = tk.Toplevel(self.parent)
@@ -312,12 +357,22 @@ class ExportTab:
         Returns:
             Sanitized string safe for filesystem use
         """
+        reserved_windows_names = {
+            "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4",
+            "com5", "com6", "com7", "com8", "com9", "lpt1", "lpt2", "lpt3",
+            "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
+        }
+
         # Replace invalid characters with underscores
         sanitized = INVALID_FILENAME_CHARS.sub('_', name)
         # Replace spaces with underscores
         sanitized = sanitized.replace(' ', '_')
         # Remove leading/trailing underscores
         sanitized = sanitized.strip('_')
+
+        if sanitized.lower() in reserved_windows_names:
+            sanitized = f"{sanitized}_profile"
+
         # Ensure not empty
         return sanitized or 'unnamed_profile'
 
@@ -355,7 +410,7 @@ class ExportTab:
         # Validate profile name
         validation_error = self._validate_profile_name(name)
         if validation_error:
-            messagebox.showwarning("Invalid Name", validation_error)
+            messagebox.showwarning("Invalid Name", validation_error, parent=self._parent_window())
             return
 
         name = name.strip()
@@ -370,26 +425,32 @@ class ExportTab:
 
         # Ensure profiles directory exists
         try:
-            PROFILES_DIR.mkdir(parents=True, exist_ok=True)
+            self._profiles_dir.mkdir(parents=True, exist_ok=True)
         except OSError as e:
             logger.error(f"Failed to create profiles directory: {e}")
-            messagebox.showerror("Error", f"Cannot create profiles directory:\n{e}")
+            messagebox.showerror(
+                "Error", f"Cannot create profiles directory:\n{e}", parent=self._parent_window()
+            )
             return
 
         sanitized_name = self._sanitize_filename(name)
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         filename = f"{sanitized_name}_{timestamp}.json"
-        filepath = PROFILES_DIR / filename
+        filepath = self._profiles_dir / filename
 
         try:
             with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(profile, f, indent=2, ensure_ascii=False)
-            messagebox.showinfo("Success", f"Profile saved:\n{filepath.name}")
+            messagebox.showinfo(
+                "Success", f"Profile saved:\n{filepath.name}", parent=self._parent_window()
+            )
             logger.info(f"Profile saved to {filepath}")
             self._refresh_profiles_list()
         except (OSError, PermissionError) as e:
             logger.error(f"Failed to save profile: {e}")
-            messagebox.showerror("Error", f"Failed to save profile:\n{e}")
+            messagebox.showerror(
+                "Error", f"Failed to save profile:\n{e}", parent=self._parent_window()
+            )
     
     def _parse_profile_file(self, filepath: Path) -> Optional[ProfileData]:
         """
@@ -425,8 +486,9 @@ class ExportTab:
         Opens a file selection dialog and loads the selected profile.
         """
         filepath = filedialog.askopenfilename(
+            parent=self._parent_window(),
             filetypes=[("JSON files", "*.json")],
-            initialdir=PROFILES_DIR
+            initialdir=self._profiles_dir
         )
 
         if filepath:
@@ -445,7 +507,8 @@ class ExportTab:
         if profile is None:
             messagebox.showerror(
                 "Error",
-                "Failed to load profile:\nFile may be corrupted or invalid."
+                "Failed to load profile:\nFile may be corrupted or invalid.",
+                parent=self._parent_window(),
             )
             return
 
@@ -457,7 +520,8 @@ class ExportTab:
             logger.warning(f"Profile {filepath} has invalid params type: {type(params)}")
             messagebox.showerror(
                 "Error",
-                "Profile has invalid format:\n'params' is not a dictionary."
+                "Profile has invalid format:\n'params' is not a dictionary.",
+                parent=self._parent_window(),
             )
             return
 
@@ -473,7 +537,8 @@ class ExportTab:
         if not known_params:
             messagebox.showwarning(
                 "No Parameters",
-                "This profile contains no recognized parameters."
+                "This profile contains no recognized parameters.",
+                parent=self._parent_window(),
             )
             return
 
@@ -493,11 +558,11 @@ class ExportTab:
             "This will update the current tuning parameters."
         )
 
-        if not messagebox.askyesno("Load Profile", msg):
+        if not messagebox.askyesno("Load Profile", msg, parent=self._parent_window()):
             return
 
         self.set_params(known_params)
-        messagebox.showinfo("Success", f"Loaded profile: {name}")
+        messagebox.showinfo("Success", f"Loaded profile: {name}", parent=self._parent_window())
         logger.info(f"Loaded profile '{name}' from {filepath}")
     
     def _get_selected_profile_path(self) -> Optional[Path]:
@@ -523,14 +588,16 @@ class ExportTab:
         if filepath is None:
             messagebox.showinfo(
                 "Load Profile",
-                "Select a profile from the list first."
+                "Select a profile from the list first.",
+                parent=self._parent_window(),
             )
             return
 
         if not filepath.exists():
             messagebox.showerror(
                 "Error",
-                "Selected profile file no longer exists.\nRefreshing list..."
+                "Selected profile file no longer exists.\nRefreshing list...",
+                parent=self._parent_window(),
             )
             self._refresh_profiles_list()
             return
@@ -548,14 +615,16 @@ class ExportTab:
         if filepath is None:
             messagebox.showinfo(
                 "Delete Profile",
-                "Select a profile from the list first."
+                "Select a profile from the list first.",
+                parent=self._parent_window(),
             )
             return
 
         if not filepath.exists():
             messagebox.showinfo(
                 "Delete Profile",
-                "Selected profile file no longer exists.\nRefreshing list..."
+                "Selected profile file no longer exists.\nRefreshing list...",
+                parent=self._parent_window(),
             )
             self._refresh_profiles_list()
             return
@@ -569,18 +638,23 @@ class ExportTab:
 
         if not messagebox.askyesno(
             "Delete Profile",
-            f"Delete profile '{name}'?\n\nThis action cannot be undone."
+            f"Delete profile '{name}'?\n\nThis action cannot be undone.",
+            parent=self._parent_window(),
         ):
             return
 
         try:
             filepath.unlink()
-            messagebox.showinfo("Deleted", f"Profile '{name}' deleted.")
+            messagebox.showinfo(
+                "Deleted", f"Profile '{name}' deleted.", parent=self._parent_window()
+            )
             logger.info(f"Deleted profile: {filepath}")
             self._refresh_profiles_list()
         except (OSError, PermissionError) as e:
             logger.error(f"Failed to delete profile {filepath}: {e}")
-            messagebox.showerror("Error", f"Failed to delete profile:\n{e}")
+            messagebox.showerror(
+                "Error", f"Failed to delete profile:\n{e}", parent=self._parent_window()
+            )
 
     def _open_profiles_folder(self) -> None:
         """Open the profiles directory in the system file manager."""
@@ -588,23 +662,27 @@ class ExportTab:
         import sys
 
         try:
-            PROFILES_DIR.mkdir(parents=True, exist_ok=True)
+            self._profiles_dir.mkdir(parents=True, exist_ok=True)
         except OSError as e:
             logger.error(f"Cannot create profiles directory: {e}")
-            messagebox.showerror("Error", f"Cannot create profiles directory:\n{e}")
+            messagebox.showerror(
+                "Error", f"Cannot create profiles directory:\n{e}", parent=self._parent_window()
+            )
             return
 
         try:
             if sys.platform.startswith('win'):
                 import os
-                os.startfile(PROFILES_DIR)
+                os.startfile(str(self._profiles_dir))
             elif sys.platform == 'darwin':
-                subprocess.run(['open', str(PROFILES_DIR)], check=False)
+                subprocess.run(['open', str(self._profiles_dir)], check=False)
             else:
-                subprocess.run(['xdg-open', str(PROFILES_DIR)], check=False)
+                subprocess.run(['xdg-open', str(self._profiles_dir)], check=False)
         except (OSError, FileNotFoundError) as e:
             logger.error(f"Could not open profiles folder: {e}")
-            messagebox.showerror("Error", f"Could not open profiles folder:\n{e}")
+            messagebox.showerror(
+                "Error", f"Could not open profiles folder:\n{e}", parent=self._parent_window()
+            )
     
     def _format_profile_display(self, profile_path: Path) -> str:
         """
@@ -663,13 +741,13 @@ class ExportTab:
         self.profiles_listbox.delete(0, tk.END)
         self._profile_paths = []
 
-        if not PROFILES_DIR.exists():
+        if not self._profiles_dir.exists():
             return
 
         try:
             # Collect profile paths, filtering out inaccessible files
             profile_files = []
-            for p in PROFILES_DIR.glob("*.json"):
+            for p in self._profiles_dir.glob("*.json"):
                 mtime = self._get_file_mtime(p)
                 if mtime > 0:
                     profile_files.append((p, mtime))
