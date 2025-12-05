@@ -764,7 +764,7 @@ class DashboardTab:
         )
         menu.add_separator()
         menu.add_command(
-            label=f"Edit Value...", 
+            label="Edit Value...",
             command=lambda: self._edit_param_value(param_name)
         )
         menu.add_separator()

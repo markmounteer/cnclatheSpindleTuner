@@ -80,7 +80,7 @@ class ExportTab:
 
     def __init__(
         self,
-        parent: ttk.Frame,
+        parent: "ttk.Frame",
         data_logger: Any,  # DataLogger type from logger module
         ini_handler: Any,  # IniFileHandler type from hal module
         get_params_callback: Callable[[], Dict[str, float]],
@@ -445,7 +445,7 @@ class ExportTab:
         if profile is None:
             messagebox.showerror(
                 "Error",
-                f"Failed to load profile:\nFile may be corrupted or invalid."
+                "Failed to load profile:\nFile may be corrupted or invalid."
             )
             return
 
