@@ -43,4 +43,4 @@ def test_monitor_pins_are_unique():
 def test_encoder_specs_are_positive():
     """Encoder configuration must use positive, non-zero values."""
     assert ENCODER_SPECS["counts_per_rev"] > 0
-    assert abs(ENCODER_SPECS["dpll_timer_us"]) > 0
+    assert ENCODER_SPECS["dpll_timer_us"] > 0
