@@ -21,4 +21,5 @@ def test_mock_feedback_and_error_signs():
 
     assert outputs["pid.s.feedback"] < 0
     assert outputs["pid.s.error"] < 0
-    assert outputs["pid.s.feedback_raw"] == outputs["pid.s.feedback"]
+    assert outputs["pid.s.feedback_raw"] < 0
+    assert outputs["pid.s.feedback_raw"] != outputs["pid.s.feedback"]

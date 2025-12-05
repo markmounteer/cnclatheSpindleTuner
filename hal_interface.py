@@ -190,6 +190,8 @@ class MockPhysicsEngine:
         self.state = state
         self.physics = physics_params or PhysicsParameters()
         self._last_update_mono = time.monotonic()
+        # Deterministic noise for repeatable tests
+        random.seed(0)
     
     def update(self) -> Dict[str, float]:
         """
@@ -272,7 +274,7 @@ class MockPhysicsEngine:
             else self.state.last_direction.value
         )
         polarity_mult = -1 if self.state.polarity_reversed else 1
-        command_sign = command_dir * polarity_mult
+        command_sign = command_dir
 
         # === PID SIMULATION ===
         FF0 = params.get('FF0', 1.0)
@@ -284,7 +286,7 @@ class MockPhysicsEngine:
 
         # Use signed command/feedback to keep PID math consistent with exported values
         signed_limited_cmd = limited_cmd * command_sign
-        signed_feedback = self.state.rpm_filtered * command_sign
+        signed_feedback = self.state.rpm_filtered * dir_mult * polarity_mult
 
         error = signed_limited_cmd - signed_feedback
         p_term = P * error
@@ -297,8 +299,8 @@ class MockPhysicsEngine:
             d_term = D * (error - self.state.prev_error) / max(dt, 1e-6)
         self.state.prev_error = error
 
-        ff1_term = FF1 * (signed_limited_cmd - self.state.prev_limited_cmd) / max(dt, 1e-6)
-        self.state.prev_limited_cmd = signed_limited_cmd
+        ff1_term = FF1 * command_sign * (limited_cmd - self.state.prev_limited_cmd) / max(dt, 1e-6)
+        self.state.prev_limited_cmd = limited_cmd
 
         pid_correction = p_term + self.state.error_i + d_term
         vfd_output = signed_limited_cmd * FF0 + ff1_term + pid_correction
@@ -347,9 +349,8 @@ class MockPhysicsEngine:
         
         # === BUILD OUTPUT VALUES ===
         filtered_rpm = self.state.rpm_filtered
-        signed_rpm = filtered_rpm * command_sign
-        # Keep raw feedback aligned with filtered feedback for deterministic mock tests
-        signed_rpm_raw = signed_rpm
+        signed_rpm = filtered_rpm * dir_mult * polarity_mult
+        signed_rpm_raw = measured_rpm * dir_mult * polarity_mult
         abs_rpm = abs(filtered_rpm)
         encoder_scale = -4096 if self.state.polarity_reversed else 4096
         signed_cmd_raw = target * command_sign
@@ -1627,18 +1628,19 @@ class IniFileHandler:
         for name, baseline in BASELINE_PARAMS.items():
             raw_value = params.get(name, baseline)
             try:
+                baseline_value = float(baseline)
                 current = float(raw_value)
             except (TypeError, ValueError):
                 logger.warning(f"Non-numeric value for {name} in baseline comparison: {raw_value}")
                 continue
 
-            if abs(current - baseline) < 0.001:
+            if abs(current - baseline_value) < 0.001:
                 status = 'same'
-            elif current > baseline:
+            elif current > baseline_value:
                 status = 'higher'
             else:
                 status = 'lower'
-            
-            comparison[name] = (current, baseline, status)
+
+            comparison[name] = (current, baseline_value, status)
         
         return comparison
