@@ -197,42 +197,96 @@ ENCODER_SPECS: EncoderSpecs = {
 # ==============================================================================
 
 SYMPTOM_DIAGNOSIS: List[Tuple[str, str, str]] = [
-    ("Fast Oscillation (>1 Hz)",
-     "- Reduce P-gain (try 0.05)\n- Increase DEADBAND (try 15-20)\n- Check VFD torque boost is OFF (P72=0)",
-     "orange"),
-    ("Slow Oscillation (0.1-0.5 Hz)",
-     "- Disable VFD torque boost (P72=0)\n- Reduce I-gain (try 0.8)\n- Verify limit2 is working (check signals)",
-     "orange"),
-    ("Overshoot on Speed Changes",
-     "- Verify limit2.maxv matches VFD accel time\n- Reduce FF1 (try 0.3)\n- Check RateLimit = 1800 / VFD_accel_seconds",
-     "yellow"),
-    ("Slow Load Recovery (>2s)",
-     "- Increase I-gain (try 1.2-1.5)\n- Increase MaxErrorI proportionally\n- Check VFD slip compensation setting",
-     "yellow"),
-    ("Speed Not Reaching Target",
-     "- Check VFD P0.04 >= 62 Hz\n- Verify VFD_SCALE matches motor\n- Check MaxErrorI allows enough correction\n- Verify analog output reaches VFD",
-     "red"),
-    ("Steady-State Error (+/-10+ RPM)",
-     "- Increase I-gain slightly\n- Reduce DEADBAND if too high\n- Check encoder scale is correct (4096)",
-     "yellow"),
-    ("Hunting at Low Speed (<200 RPM)",
-     "- Increase DEADBAND (try 15-20)\n- Check DPLL is configured\n- Verify encoder vel-timeout = 0.1",
-     "orange"),
-    ("Unexpected Realtime Delay",
-     "- Run latency-histogram test\n- Disable CPU frequency scaling\n- Check for competing processes\n- Consider isolcpus kernel parameter",
-     "orange"),
-    ("No Encoder Counts",
-     "- Check encoder wiring (A, B, Z, 5V, GND)\n- Verify 5V power at encoder\n- Try filter=0 temporarily\n- Check Mesa encoder counter increment",
-     "red"),
-    ("VFD Faults on Start",
-     "- Increase VFD accel time to 2-3s\n- Reduce FF1 (try 0.25)\n- Check for overcurrent (motor wiring)\n- Verify VFD current limit settings",
-     "red"),
-    ("Integrator Windup",
-     "- Reduce MaxErrorI to 50\n- Verify limit2 is active (check signal path)\n- Check for large sustained errors\n- Consider adding error deadband",
-     "yellow"),
-    ("Reverse Runaway (M4)",
-     "- Verify ABS component in signal path\n- Check spindle-vel-fb-rpm-abs always positive\n- Test with M4 S100 and monitor feedback\n- Fix encoder polarity if needed",
-     "red"),
+    (
+        "Fast Oscillation (>1 Hz)",
+        "- Reduce P-gain (try 0.05)\n"
+        "- Increase DEADBAND (try 15-20)\n"
+        "- Check VFD torque boost is OFF (P72=0)",
+        "orange",
+    ),
+    (
+        "Slow Oscillation (0.1-0.5 Hz)",
+        "- Disable VFD torque boost (P72=0)\n"
+        "- Reduce I-gain (try 0.8)\n"
+        "- Verify limit2 is working (check signals)",
+        "orange",
+    ),
+    (
+        "Overshoot on Speed Changes",
+        "- Verify limit2.maxv matches VFD accel time\n"
+        "- Reduce FF1 (try 0.3)\n"
+        "- Check RateLimit = 1800 / VFD_accel_seconds",
+        "yellow",
+    ),
+    (
+        "Slow Load Recovery (>2s)",
+        "- Increase I-gain (try 1.2-1.5)\n"
+        "- Increase MaxErrorI proportionally\n"
+        "- Check VFD slip compensation setting",
+        "yellow",
+    ),
+    (
+        "Speed Not Reaching Target",
+        "- Check VFD P0.04 >= 62 Hz\n"
+        "- Verify VFD_SCALE matches motor\n"
+        "- Check MaxErrorI allows enough correction\n"
+        "- Verify analog output reaches VFD",
+        "red",
+    ),
+    (
+        "Steady-State Error (+/-10+ RPM)",
+        "- Increase I-gain slightly\n"
+        "- Reduce DEADBAND if too high\n"
+        "- Check encoder scale is correct (4096)",
+        "yellow",
+    ),
+    (
+        "Hunting at Low Speed (<200 RPM)",
+        "- Increase DEADBAND (try 15-20)\n"
+        "- Check DPLL is configured\n"
+        "- Verify encoder vel-timeout = 0.1",
+        "orange",
+    ),
+    (
+        "Unexpected Realtime Delay",
+        "- Run latency-histogram test\n"
+        "- Disable CPU frequency scaling\n"
+        "- Check for competing processes\n"
+        "- Consider isolcpus kernel parameter",
+        "orange",
+    ),
+    (
+        "No Encoder Counts",
+        "- Check encoder wiring (A, B, Z, 5V, GND)\n"
+        "- Verify 5V power at encoder\n"
+        "- Try filter=0 temporarily\n"
+        "- Check Mesa encoder counter increment",
+        "red",
+    ),
+    (
+        "VFD Faults on Start",
+        "- Increase VFD accel time to 2-3s\n"
+        "- Reduce FF1 (try 0.25)\n"
+        "- Check for overcurrent (motor wiring)\n"
+        "- Verify VFD current limit settings",
+        "red",
+    ),
+    (
+        "Integrator Windup",
+        "- Reduce MaxErrorI to 50\n"
+        "- Verify limit2 is active (check signal path)\n"
+        "- Check for large sustained errors\n"
+        "- Consider adding error deadband",
+        "yellow",
+    ),
+    (
+        "Reverse Runaway (M4)",
+        "- Verify ABS component in signal path\n"
+        "- Check spindle-vel-fb-rpm-abs always positive\n"
+        "- Test with M4 S100 and monitor feedback\n"
+        "- Fix encoder polarity if needed",
+        "red",
+    ),
 ]
 
 
