@@ -399,7 +399,7 @@ class TroubleshooterTab:
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
         return {'container': container, 'canvas': canvas, 'frame': frame,
-                'bind_mousewheel': _bind_mousewheel}
+                'bind_mousewheel': _bind_to_mousewheel}
 
     # =========================================================================
     # LEFT PANE: AUDIT & WIZARD

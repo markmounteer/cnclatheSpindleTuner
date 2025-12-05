@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
-from typing import Dict, Callable, Optional, List
+from typing import Dict, Callable, Optional
 from collections import deque
 from datetime import datetime
 import time
@@ -755,7 +755,7 @@ class DashboardTab:
         )
         menu.add_separator()
         menu.add_command(
-            label=f"Edit Value...", 
+            label="Edit Value...",
             command=lambda: self._edit_param_value(param_name)
         )
         menu.add_separator()
