@@ -1,13 +1,12 @@
 # Potential Features Register
 **Directory:** /home/user/cnclatheSpindleTuner/
-**Last Updated:** 2025-12-05 21:30 UTC
-**Total Entries:** 21 | **New:** 21 | **Under Review:** 0 | **Resolved:** 0
+**Last Updated:** 2025-12-05 23:45 UTC
+**Total Entries:** 20 | **New:** 20 | **Under Review:** 0 | **Resolved:** 0
 
 ## Summary Index
 | ID | Status | Priority | Source File | Title | Submitted |
 |----|--------|----------|-------------|-------|-----------|
 | FEAT-20251205-001 | 🆕 New | 🟢 Low | dashboard.py | Error History Export | 2025-12-05 |
-| FEAT-20251205-002 | 🆕 New | 🟢 Low | dashboard.py | Speed Entry Field Validation | 2025-12-05 |
 | FEAT-20251205-003 | 🆕 New | 🟢 Low | dashboard.py | Dynamic Plot Trace Label | 2025-12-05 |
 | FEAT-20251205-004 | 🆕 New | 🟢 Low | dashboard.py | Fallback Chart Error Trace Scaling Indicator | 2025-12-05 |
 | FEAT-20251205-005 | 🆕 New | 🟢 Low | dashboard.py | Keyboard Shortcut Help Overlay | 2025-12-05 |
@@ -62,34 +61,6 @@
 - Add an export control to the statistics panel.
 - Choose formats such as CSV, JSON, or plain text.
 - Manage memory for large history buffers and consider limits on export size.
-
-**Review History:**
-- 2025-12-05 | System | Entry migrated to standardized register format.
-
----
-
-### FEAT-20251205-002 Speed Entry Field Validation
-
-| Field | Value |
-|-------|-------|
-| Status | 🆕 New |
-| Source File | dashboard.py |
-| Location | Line 441 |
-| Submitted By | Code Review Agent |
-| Submitted | 2025-12-05 |
-| Priority | 🟢 Low |
-| Duplicate Of | N/A |
-
-**Description:** Add input validation to prevent non-numeric characters in the speed entry field.
-
-**Context:** Validation currently occurs only when converting input to an integer during use.
-
-**Rationale:** Immediate feedback would reduce confusion and prevent silent fallback to default speeds.
-
-**Implementation Considerations:**
-- Use `validatecommand` or event bindings to restrict input.
-- Handle paste operations and empty input gracefully.
-- Decide how to treat negatives and leading zeros.
 
 **Review History:**
 - 2025-12-05 | System | Entry migrated to standardized register format.
