@@ -83,9 +83,14 @@ class Tooltip:
     
     def _show(self, event=None):
         """Show tooltip near widget."""
+        # Destroy any existing tooltip to prevent orphaned windows
+        if self.tooltip_window:
+            self.tooltip_window.destroy()
+            self.tooltip_window = None
+
         x = self.widget.winfo_rootx() + 25
         y = self.widget.winfo_rooty() + 25
-        
+
         self.tooltip_window = tk.Toplevel(self.widget)
         self.tooltip_window.wm_overrideredirect(True)
         self.tooltip_window.wm_geometry(f"+{x}+{y}")
@@ -961,6 +966,7 @@ class DashboardTab:
         """Handle slider change."""
         try:
             val = self._snap_param(param_name, float(value))
+            self.param_vars[param_name].set(val)
             if param_name in self.param_labels:
                 self.param_labels[param_name].config(text=f"{val:.2f}")
             
@@ -1005,7 +1011,10 @@ class DashboardTab:
                 self.param_vars[param].set(value)
                 if param in self.param_labels:
                     self.param_labels[param].config(text=f"{value:.2f}")
-                self.hal.set_param(param, value)
+                if self.live_apply.get():
+                    self.hal.set_param(param, value)
+                elif self.on_param_change:
+                    self.on_param_change(param, value)
         self._show_status_message(f"Applied '{preset_name}' preset")
     
     def apply_all_params(self):
@@ -1299,6 +1308,26 @@ class DashboardTab:
                     y_max = max(all_data) + 50
                     self.ax.set_ylim(y_min, y_max)
             
+            # Regenerate legend with only visible traces to fix de-sync issue
+            if self.dual_axis.get():
+                lines1 = [l for l in self.ax.get_lines() if l.get_visible()]
+                labels1 = [l.get_label() for l in lines1]
+                if self.ax2:
+                    lines2 = [l for l in self.ax2.get_lines() if l.get_visible()]
+                    labels2 = [l.get_label() for l in lines2]
+                    if lines1 or lines2:
+                        self.ax.legend(lines1 + lines2, labels1 + labels2,
+                                      loc='upper right', fontsize=8, framealpha=0.5)
+            else:
+                visible_lines = [(name, line) for name, line in self.lines.items()
+                                if line.get_visible()]
+                if visible_lines:
+                    self.ax.legend([l for _, l in visible_lines],
+                                  [PLOT_TRACES[n]['label'] for n, _ in visible_lines],
+                                  loc='upper right', fontsize=8, framealpha=0.5)
+                elif self.ax.get_legend():
+                    self.ax.get_legend().remove()
+
             # Expensive full redraw
             self.canvas.draw()
             self.plot_dirty = False
