@@ -599,12 +599,13 @@ class HalInterface:
             return value
     
     def _get_mock_value(self, pin_name: str) -> float:
-        """Get simulated value for pin."""
-        # Update physics if needed
-        if self._physics_engine:
-            self._mock_values = self._physics_engine.update()
-        
-        return self._mock_values.get(pin_name, 0.0)
+        """Get simulated value for pin. Thread-safe via RLock."""
+        with self._lock:
+            # Update physics if needed
+            if self._physics_engine:
+                self._mock_values = self._physics_engine.update()
+
+            return self._mock_values.get(pin_name, 0.0)
     
     @staticmethod
     def _parse_hal_value(text: str) -> float:
@@ -941,10 +942,10 @@ class HalInterface:
         if self.is_mock:
             return self._mock_mdi(command)
         
-        if self._linuxcnc_cmd is None:
+        if self._linuxcnc_cmd is None or self._linuxcnc_stat is None:
             logger.error("LinuxCNC command interface not available")
             return False
-        
+
         try:
             self._linuxcnc_stat.poll()
             
@@ -1138,7 +1139,6 @@ class IniFileHandler:
             backup_path = self.backup_dir / backup_name
             
             # Copy file
-            import shutil
             shutil.copy2(self.ini_path, backup_path)
             
             logger.info(f"INI backup created: {backup_path}")
@@ -1242,9 +1242,9 @@ class IniFileHandler:
         
         params = {}
         for ini_key, param_name in mapping.items():
-            if ini_key.upper() in raw_lower:
+            if ini_key in raw_lower:
                 try:
-                    params[param_name] = float(raw_lower[ini_key.upper()])
+                    params[param_name] = float(raw_lower[ini_key])
                 except (ValueError, TypeError):
                     logger.warning(f"Invalid value for {ini_key} in INI file")
         
