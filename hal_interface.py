@@ -306,7 +306,9 @@ class MockPhysicsEngine:
         
         # === REVOLUTIONS TRACKING ===
         rps = current_rpm / 60.0
+        # dir_mult: 0 when stopped (no revolution accumulation), else direction sign
         dir_mult = self.state.direction.value if self.state.direction != SpindleDirection.STOPPED else 0
+        # command_dir: defaults to 1 (forward) when stopped for signed command display
         command_dir = self.state.direction.value if self.state.direction != SpindleDirection.STOPPED else 1
         self.state.revolutions += rps * dt * dir_mult
         
@@ -774,8 +776,8 @@ class HalInterface:
                 logger.error(f"Error parsing bulk value for {pin}: {e}")
 
         if values:
-            now = time.monotonic()
             with self._lock:
+                now = time.monotonic()  # Capture inside lock for consistency
                 for pin, val in values.items():
                     self._cache[pin] = CachedValue(val, now)
 
@@ -1001,7 +1003,7 @@ class HalInterface:
                 input=cmd_str,
                 capture_output=True,
                 text=True,
-                timeout=3
+                timeout=3.0
             )
 
             if result.returncode == 0:
