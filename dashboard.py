@@ -752,6 +752,13 @@ class DashboardTab:
             legend_canvas.create_line(0, 5, 20, 5, fill=color, width=2)
             ttk.Label(lf, text=trace_labels[name], font=("Arial", 8)).pack(side=tk.LEFT)
 
+        ttk.Label(
+            legend_frame,
+            text="Error trace scaled ×5 and centered for visibility",
+            font=("Arial", 8),
+            foreground="#666",
+        ).pack(side=tk.RIGHT, padx=10)
+
         # Telemetry summary below the chart
         self._setup_fallback_telemetry(main_frame)
 
