@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-from __future__ import annotations
 """
 Spindle Tuner - Dashboard Feature
 
@@ -24,6 +23,8 @@ Improvements in this version:
 - Precision parameter editing (click value to type)
 - Individual parameter reset (right-click context menu)
 """
+
+from __future__ import annotations
 
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
@@ -95,9 +96,15 @@ class Tooltip:
         self.tooltip_window.wm_overrideredirect(True)
         self.tooltip_window.wm_geometry(f"+{x}+{y}")
         
-        label = ttk.Label(self.tooltip_window, text=self.text, 
-                         background="lightyellow", relief="solid", 
-                         borderwidth=1, padding="3 3 3 3")
+        label = tk.Label(
+            self.tooltip_window,
+            text=self.text,
+            bg="lightyellow",
+            relief="solid",
+            bd=1,
+            padx=3,
+            pady=3,
+        )
         label.pack()
     
     def _hide(self, event=None):
@@ -159,7 +166,7 @@ class DashboardTab:
         self.canvas = None
         self.lines: Dict[str, "Line2D"] = {}  # String annotation for conditional import
         self.plot_paused = False
-        self.time_scale = tk.IntVar(value=HISTORY_DURATION_S)
+        self.time_scale = tk.IntVar(value=int(HISTORY_DURATION_S))
         self.dual_axis = tk.BooleanVar(value=False)
         
         # Blitting optimization state (for Raspberry Pi performance)
@@ -471,7 +478,7 @@ class DashboardTab:
 
         # Fit button (manual auto-scale without clearing data)
         ttk.Button(controls, text="Fit", width=4,
-                  command=lambda: setattr(self, 'plot_dirty', True)).pack(side=tk.LEFT, padx=5)
+                  command=self._fit_plot).pack(side=tk.LEFT, padx=5)
         
         # Export data button
         ttk.Button(controls, text="📊 Data", width=7,
@@ -594,6 +601,12 @@ class DashboardTab:
 
         if self.canvas:
             self.canvas.draw()
+
+    def _fit_plot(self):
+        """Request a plot rescale and trigger a redraw."""
+        self.plot_dirty = True
+        if self.canvas:
+            self.canvas.draw_idle()
     
     def _setup_parameters(self, parent: ttk.Frame):
         """Setup parameter tuning controls with groups."""
@@ -1236,8 +1249,8 @@ class DashboardTab:
             return
         
         times, cmd, feedback, error, errorI = self.logger.get_plot_data()
-        
-        if not times:
+
+        if times is None or len(times) == 0:
             return
         
         # Update line data
@@ -1332,10 +1345,15 @@ class DashboardTab:
             self.plot_dirty = False
             # Background will be recaptured by _on_plot_draw callback
         else:
+            # Blitting with dual axes can produce artifacts; fall back to full draw
+            if self.dual_axis.get():
+                self.canvas.draw()
+                return
+
             # Fast blitting update: restore background, draw lines, blit
             if self.background is not None:
                 self.canvas.restore_region(self.background)
-                
+
                 # Draw only visible animated lines on correct axis
                 for name, line in self.lines.items():
                     if line.get_visible():
@@ -1343,7 +1361,7 @@ class DashboardTab:
                             self.ax2.draw_artist(line)
                         else:
                             self.ax.draw_artist(line)
-                
+
                 self.canvas.blit(self.ax.bbox)
                 self.canvas.flush_events()
     
