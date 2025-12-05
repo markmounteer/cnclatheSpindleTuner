@@ -337,21 +337,13 @@ class DashboardTab:
         for key, text, tooltip in indicators:
             frame = ttk.Frame(status_frame)
             frame.pack(anchor=tk.W, pady=1)
-            
-            lbl = ttk.Label(frame, text=f"● {text}", 
+
+            lbl = ttk.Label(frame, text=f"● {text}",
                            foreground="gray", font=("Arial", 9))
             lbl.pack(side=tk.LEFT)
             self.status_indicators[key] = lbl
-            
-            # Store tooltip text
-            lbl.tooltip_text = tooltip
-            lbl.bind("<Enter>", self._show_tooltip)
-            lbl.bind("<Leave>", self._hide_tooltip)
-        
-        # Tooltip label
-        self.tooltip_label = ttk.Label(status_frame, text="", 
-                                        font=("Arial", 8), foreground="gray")
-        self.tooltip_label.pack(anchor=tk.W, pady=(5, 0))
+
+            Tooltip(lbl, tooltip)
     
     def _setup_statistics(self, parent: ttk.Frame):
         """Setup statistics panel showing min/max/avg."""
@@ -510,6 +502,7 @@ class DashboardTab:
         # Toolbar
         toolbar = NavigationToolbar2Tk(self.canvas, plot_frame)
         toolbar.update()
+        toolbar.pack(side=tk.BOTTOM, fill=tk.X)
         
         # Trace visibility controls
         trace_frame = ttk.Frame(plot_frame)
@@ -660,9 +653,7 @@ class DashboardTab:
                 # Label with tooltip and right-click context menu
                 lbl = ttk.Label(frame, text=param_name, width=9)
                 lbl.pack(side=tk.LEFT)
-                lbl.tooltip_text = f"{desc}\nRange: {min_val} - {max_val}\nRight-click to reset"
-                lbl.bind("<Enter>", self._show_tooltip)
-                lbl.bind("<Leave>", self._hide_tooltip)
+                Tooltip(lbl, f"{desc}\nRange: {min_val} - {max_val}\nRight-click to reset")
                 lbl.bind("<Button-3>", lambda e, p=param_name: self._show_param_context_menu(e, p))
                 
                 # Variable
@@ -1079,8 +1070,8 @@ class DashboardTab:
         min_err = min(errors)
         max_err = max(errors)
 
-        # Standard deviation (robust even with a single sample)
-        variance = sum((e - avg) ** 2 for e in errors) / len(errors)
+        # Standard deviation (sample variance for small windows)
+        variance = 0.0 if len(errors) == 1 else sum((e - avg) ** 2 for e in errors) / (len(errors) - 1)
         std = variance ** 0.5
         
         # Stability assessment
@@ -1105,20 +1096,6 @@ class DashboardTab:
         self.stats_labels['error_std'].config(text=f"{std:.1f}")
         self.stats_labels['peak_error'].config(text=f"{self.session_peak_error:.1f}")
         self.stats_labels['stability'].config(text=stability, foreground=color)
-    
-    # =========================================================================
-    # TOOLTIP HANDLING
-    # =========================================================================
-    
-    def _show_tooltip(self, event):
-        """Show tooltip for widget."""
-        widget = event.widget
-        if hasattr(widget, 'tooltip_text'):
-            self.tooltip_label.config(text=widget.tooltip_text)
-    
-    def _hide_tooltip(self, event):
-        """Hide tooltip."""
-        self.tooltip_label.config(text="")
     
     # =========================================================================
     # UPDATE METHODS
