@@ -212,38 +212,50 @@ class DataLogger:
         rpm_90 = start_rpm + 0.9 * step_size
         rpm_98 = start_rpm + 0.98 * step_size
         rpm_102 = start_rpm + 1.02 * step_size
+
+        lower_band = min(rpm_98, rpm_102)
+        upper_band = max(rpm_98, rpm_102)
         
-        # Find rise time (10% to 90%)
+        # Find rise time (10% to 90%) using threshold crossings
         time_10 = None
         time_90 = None
-        
+        previous_rpm = start_rpm
+
         for t, rpm in test_data:
-            if time_10 is None and rpm >= rpm_10:
+            if step_size > 0:
+                crossed_10 = previous_rpm < rpm_10 <= rpm
+                crossed_90 = previous_rpm < rpm_90 <= rpm
+            else:
+                crossed_10 = previous_rpm > rpm_10 >= rpm
+                crossed_90 = previous_rpm > rpm_90 >= rpm
+
+            if time_10 is None and crossed_10:
                 time_10 = t
-            if time_90 is None and rpm >= rpm_90:
+            if time_10 is not None and time_90 is None and crossed_90:
                 time_90 = t
                 break
-        
+
+            previous_rpm = rpm
+
         if time_10 is not None and time_90 is not None:
             metrics.rise_time_s = time_90 - time_10
-        
+
         # Find settling time (within 2% band)
         settling_time = None
         in_band_since = None
-        
+
         for t, rpm in test_data:
-            in_band = rpm_98 <= rpm <= rpm_102
+            in_band = lower_band <= rpm <= upper_band
             if in_band:
                 if in_band_since is None:
                     in_band_since = t
             else:
                 in_band_since = None
-            
-            # Require 0.5s in band to count as settled
-            if in_band_since is not None and (t - in_band_since) >= 0.5:
-                settling_time = in_band_since - step_start_time
-                break
-        
+
+        last_time = test_data[-1][0]
+        if in_band_since is not None and (last_time - in_band_since) >= 0.5:
+            settling_time = in_band_since - step_start_time
+
         if settling_time is not None:
             metrics.settling_time_s = settling_time
         
@@ -260,11 +272,15 @@ class DataLogger:
         if overshoot > 0:
             metrics.overshoot_pct = (overshoot / abs(step_size)) * 100
         
-        # Calculate max error
-        errors = [abs(rpm - end_rpm) for _, rpm in test_data[-50:]]  # Last ~5 seconds
+        # Calculate max error across the full response
+        errors = [rpm - end_rpm for _, rpm in test_data]
         if errors:
-            metrics.max_error = max(errors)
-            metrics.steady_state_error = sum(errors) / len(errors)
+            metrics.max_error = max(abs(e) for e in errors)
+
+            # Use the final portion of data to calculate signed steady-state error
+            window_size = min(20, len(errors))
+            steady_state_slice = errors[-window_size:]
+            metrics.steady_state_error = sum(steady_state_slice) / len(steady_state_slice)
         
         return metrics
     
