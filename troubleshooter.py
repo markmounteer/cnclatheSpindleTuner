@@ -5,19 +5,233 @@ Spindle Tuner - Troubleshooter Feature
 Interactive diagnosis and system health monitoring based on
 Spindle PID Tuning Guide v5.3.
 
-Features:
-- Live System Health Audit (compares current params to baseline)
-- Interactive Diagnostic Wizard with back navigation
-- "Apply Fix" automation for common tuning issues
-- Searchable symptom reference library
-- Reset to Baseline functionality
+Improvements:
+- Separated decision tree data from logic
+- Enhanced "Apply Fix" with Before/After value comparison
+- Sorted Audit results by severity (Critical first)
+- Improved search filtering
 """
 
 import tkinter as tk
 from tkinter import ttk, messagebox
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 
-from config import SYMPTOM_DIAGNOSIS, BASELINE_PARAMS, TUNING_PARAMS
+from config import SYMPTOM_DIAGNOSIS, BASELINE_PARAMS
+
+
+# =============================================================================
+# WIZARD DECISION TREE DATA
+# =============================================================================
+
+WIZARD_TREE = {
+    "root": {
+        "question": "What is the primary behavior you are observing?",
+        "options": [
+            ("Unstable Speed / Oscillation", "oscillation"),
+            ("Speed Accuracy / Error", "accuracy"),
+            ("Motion Behavior (Starts/Stops)", "motion"),
+            ("Hardware / VFD / Encoder", "hardware"),
+            ("Threading / Synchronization", "threading"),
+            ("Performance / Delays", "performance"),
+        ]
+    },
+
+    # --- OSCILLATION BRANCH (§9) ---
+    "oscillation": {
+        "question": "Describe the oscillation frequency:",
+        "options": [
+            ("Fast (>1 Hz, rapid vibration/noise)", "fast_osc"),
+            ("Slow (<1 Hz, rhythmic surging)", "slow_osc"),
+            ("Only happens at very low speed (<200 RPM)", "low_speed_hunt"),
+        ]
+    },
+    "fast_osc": {
+        "result": "Excessive P-Gain (VFD Delay)",
+        "fix": "• VFDs have ~1.5s delay; high P-gain causes violent oscillation.\n• Action: Reduce P to 0.05 and increase Deadband.",
+        "color": "red",
+        "actions": {'P': 0.05, 'Deadband': 15.0}
+    },
+    "slow_osc": {
+        "result": "VFD/PID Loop Fighting",
+        "fix": "• Likely VFD 'Torque Boost' or 'Slip Comp' fighting PID I-term.\n• Manual: Set VFD P72=0 (Torque Boost).\n• Action: Reduce I-gain temporarily to stabilize.",
+        "color": "orange",
+        "actions": {'I': 0.5}
+    },
+    "low_speed_hunt": {
+        "result": "Deadband Too Tight",
+        "fix": "• At low speeds, encoder resolution limits accuracy.\n• Action: Relax Deadband to 20 RPM to stop hunting.\n• Check DPLL configuration and vel-timeout=0.1.",
+        "color": "yellow",
+        "actions": {'Deadband': 20.0}
+    },
+
+    # --- ACCURACY BRANCH (§9, §12) ---
+    "accuracy": {
+        "question": "What type of accuracy problem?",
+        "options": [
+            ("Steady state error (>10 RPM off)", "ss_error"),
+            ("RPM drops significantly under load", "load_droop"),
+            ("Drift over time (hot vs cold)", "thermal_drift"),
+            ("Wrong speed scaling (too high/low)", "wrong_scaling"),
+            ("Speed reads 0 or wrong direction", "encoder_reading"),
+        ]
+    },
+    "ss_error": {
+        "result": "Insufficient Integral Gain",
+        "fix": "• The I-term handles long-term error correction.\n• Action: Increase I-gain to 1.2.\n• Reduce Deadband if too high and check encoder scale=4096.",
+        "color": "yellow",
+        "actions": {'I': 1.2}
+    },
+    "load_droop": {
+        "result": "Weak Load Rejection",
+        "fix": "• Motor slip increases with load; PID must compensate.\n• Action: Increase MaxErrorI to allow more torque correction and I-gain.",
+        "color": "orange",
+        "actions": {'MaxErrorI': 80.0, 'I': 1.5}
+    },
+    "thermal_drift": {
+        "result": "Thermal Slip Drift",
+        "fix": "• Motor slip increases as it heats (2.7% cold → 3.6% hot).\n• Action: Increase I-gain and MaxErrorI to track drift.",
+        "color": "yellow",
+        "actions": {'I': 1.5, 'MaxErrorI': 80.0}
+    },
+    "wrong_scaling": {
+        "result": "FF0 or VFD Scaling Error",
+        "fix": "• FF0 must be 1.0 for voltage scaling.\n• Check VFD max freq >=62Hz.",
+        "color": "red",
+        "actions": {'FF0': 1.0}
+    },
+    "encoder_reading": {
+        "result": "Encoder Configuration Issue",
+        "fix": "• If negative RPM: Invert ENCODER_SCALE in INI.\n• If 0 RPM: Check physical wiring and Mesa jumpers (W10/W11).",
+        "color": "red",
+        "actions": None
+    },
+
+    # --- MOTION BRANCH (§9, §12) ---
+    "motion": {
+        "question": "When does the issue occur?",
+        "options": [
+            ("Overshoot during speed changes", "overshoot"),
+            ("Undershoot or slow to reach speed", "slow_response"),
+            ("Spindle stalls or trips VFD", "stall"),
+            ("Runaway in Reverse (M4)", "runaway"),
+            ("Integrator windup (sustained error)", "integrator_windup"),
+        ]
+    },
+    "overshoot": {
+        "result": "Aggressive Feedforward / Rate Limit",
+        "fix": "• Command is changing faster than VFD can respond.\n• Action: Reduce Accel Feedforward (FF1) and set Rate Limit.",
+        "color": "yellow",
+        "actions": {'FF1': 0.25, 'RateLimit': 1000.0}
+    },
+    "slow_response": {
+        "result": "Weak Feedforward",
+        "fix": "• Increase FF1 for better ramp tracking.\n• Check VFD accel time matches RateLimit.",
+        "color": "yellow",
+        "actions": {'FF1': 0.4}
+    },
+    "stall": {
+        "result": "Torque/Current Limit Reached",
+        "fix": "• VFD is hitting current limit or ramping too fast.\n• Manual: Increase VFD P0.11 (Accel Time).\n• Action: Reduce Rate Limit to match VFD.",
+        "color": "red",
+        "actions": {'RateLimit': 800.0}
+    },
+    "runaway": {
+        "result": "Missing ABS Component (Critical)",
+        "fix": "• PID needs positive feedback even in reverse.\n• Manual: Verify 'abs' component is linked to feedback in HAL.\n• THIS IS A SAFETY CRITICAL CONFIGURATION ISSUE.",
+        "color": "red",
+        "actions": None
+    },
+    "integrator_windup": {
+        "result": "Integrator Windup",
+        "fix": "• Reduce MaxErrorI to 50.\n• Verify limit2 is active and check for large sustained errors.",
+        "color": "orange",
+        "actions": {'MaxErrorI': 50.0}
+    },
+
+    # --- HARDWARE BRANCH (§12) ---
+    "hardware": {
+        "question": "Select the hardware symptom:",
+        "options": [
+            ("No Spindle Movement", "no_movement"),
+            ("No Encoder Counts", "no_counts"),
+            ("VFD Faults (Er.XX)", "vfd_fault"),
+            ("Mesa Card LEDs", "mesa_leds"),
+        ]
+    },
+    "no_movement": {
+        "result": "Enable/Signal Chain Broken",
+        "fix": "• Check spindle-enable signal (halshow).\n• Verify VFD P0.01=1 (Terminal Control).\n• Check analog scaling (0-10V).",
+        "color": "red",
+        "actions": None
+    },
+    "no_counts": {
+        "result": "Encoder Signal Loss",
+        "fix": "• Check 5V power at encoder connector.\n• Check Mesa Jumpers: W10, W11, W13 must be RIGHT (Diff).\n• Try filter=0 temporarily.",
+        "color": "red",
+        "actions": None
+    },
+    "vfd_fault": {
+        "result": "VFD Parameter Mismatch",
+        "fix": "• Check P0.04 (Max Hz) >= 65Hz.\n• Check P0.11 (Accel) >= 1.5s.\n• Check P72 (Torque Boost) = 0.",
+        "color": "orange",
+        "actions": None
+    },
+    "mesa_leds": {
+        "result": "Status Information",
+        "fix": "• Green = Solid (Power OK)\n• Red = Blinking (Watchdog OK)\n• If Red Solid: FPGA configuration failed (check power/cable).",
+        "color": "green",
+        "actions": None
+    },
+
+    # --- THREADING BRANCH (§10) ---
+    "threading": {
+        "question": "What threading problem?",
+        "options": [
+            ("No Index Pulse", "no_index"),
+            ("At-Speed Not Asserting", "no_at_speed"),
+            ("Bad Threads (Loss of Sync)", "bad_threads"),
+        ]
+    },
+    "no_index": {
+        "result": "Index Configuration",
+        "fix": "• Check encoder Z channel wiring.\n• Verify hm2 encoder counter-mode=0.",
+        "color": "red",
+        "actions": None
+    },
+    "no_at_speed": {
+        "result": "Tolerance Too Tight",
+        "fix": "• Set AT_SPEED_TOLERANCE = 20 RPM in INI.\n• Check Deadband not too tight.",
+        "color": "orange",
+        "actions": {'Deadband': 15.0}
+    },
+    "bad_threads": {
+        "result": "Sync Loss During Cut",
+        "fix": "• Check for oscillation or droop during cut.\n• Increase I-gain for better stiffness.",
+        "color": "yellow",
+        "actions": {'I': 1.5}
+    },
+
+    # --- PERFORMANCE BRANCH (§12) ---
+    "performance": {
+        "question": "What performance issue?",
+        "options": [
+            ("Unexpected Realtime Delay", "realtime_delay"),
+            ("VFD Slow Ramp / Response", "vfd_ramp"),
+        ]
+    },
+    "realtime_delay": {
+        "result": "Realtime Delay",
+        "fix": "• Run latency-histogram test.\n• Disable CPU frequency scaling.\n• Check for competing processes.\n• Consider isolcpus kernel parameter.",
+        "color": "orange",
+        "actions": None
+    },
+    "vfd_ramp": {
+        "result": "VFD Ramp Mismatch",
+        "fix": "• Match RateLimit to VFD accel/decel times.\n• Action: Set RateLimit to 1200 RPM/s.",
+        "color": "yellow",
+        "actions": {'RateLimit': 1200.0}
+    },
+}
 
 
 # =============================================================================
@@ -63,225 +277,7 @@ class DiagnosticWizard:
         return len(self.history) > 0
         
     def _get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
-        """
-        Define the decision tree structure.
-        
-        Returns a dict representing a Question node or a Result node.
-        
-        Structure:
-        - Question: {'question': str, 'options': [(label, next_node_id), ...]}
-        - Result:   {'result': str, 'fix': str, 'color': str, 'actions': {param: value}}
-        """
-        nodes = {
-            "root": {
-                "question": "What is the primary behavior you are observing?",
-                "options": [
-                    ("Unstable Speed / Oscillation", "oscillation"),
-                    ("Speed Accuracy / Error", "accuracy"),
-                    ("Motion Behavior (Starts/Stops)", "motion"),
-                    ("Hardware / VFD / Encoder", "hardware"),
-                    ("Threading / Synchronization", "threading"),
-                    ("Performance / Delays", "performance"),
-                ]
-            },
-            
-            # --- OSCILLATION BRANCH (§9) ---
-            "oscillation": {
-                "question": "Describe the oscillation frequency:",
-                "options": [
-                    ("Fast (>1 Hz, rapid vibration/noise)", "fast_osc"),
-                    ("Slow (<1 Hz, rhythmic surging)", "slow_osc"),
-                    ("Only happens at very low speed (<200 RPM)", "low_speed_hunt"),
-                ]
-            },
-            "fast_osc": {
-                "result": "Excessive P-Gain (VFD Delay)",
-                "fix": "• VFDs have ~1.5s delay; high P-gain causes violent oscillation.\n• Action: Reduce P to 0.05 and increase Deadband.",
-                "color": "red",
-                "actions": {'P': 0.05, 'Deadband': 15.0}
-            },
-            "slow_osc": {
-                "result": "VFD/PID Loop Fighting",
-                "fix": "• Likely VFD 'Torque Boost' or 'Slip Comp' fighting PID I-term.\n• Manual: Set VFD P72=0 (Torque Boost).\n• Action: Reduce I-gain temporarily to stabilize.",
-                "color": "orange",
-                "actions": {'I': 0.5}
-            },
-            "low_speed_hunt": {
-                "result": "Deadband Too Tight",
-                "fix": "• At low speeds, encoder resolution limits accuracy.\n• Action: Relax Deadband to 20 RPM to stop hunting.\n• Check DPLL configuration and vel-timeout=0.1.",
-                "color": "yellow",
-                "actions": {'Deadband': 20.0}
-            },
-            
-            # --- ACCURACY BRANCH (§9, §12) ---
-            "accuracy": {
-                "question": "What type of accuracy problem?",
-                "options": [
-                    ("Steady state error (>10 RPM off)", "ss_error"),
-                    ("RPM drops significantly under load", "load_droop"),
-                    ("Drift over time (hot vs cold)", "thermal_drift"),
-                    ("Wrong speed scaling (too high/low)", "wrong_scaling"),
-                    ("Speed reads 0 or wrong direction", "encoder_reading"),
-                ]
-            },
-            "ss_error": {
-                "result": "Insufficient Integral Gain",
-                "fix": "• The I-term handles long-term error correction.\n• Action: Increase I-gain to 1.2.\n• Reduce Deadband if too high and check encoder scale=4096.",
-                "color": "yellow",
-                "actions": {'I': 1.2}
-            },
-            "load_droop": {
-                "result": "Weak Load Rejection",
-                "fix": "• Motor slip increases with load; PID must compensate.\n• Action: Increase MaxErrorI to allow more torque correction and I-gain.",
-                "color": "orange",
-                "actions": {'MaxErrorI': 80.0, 'I': 1.5}
-            },
-            "thermal_drift": {
-                "result": "Thermal Slip Drift",
-                "fix": "• Motor slip increases as it heats (2.7% cold → 3.6% hot).\n• Action: Increase I-gain and MaxErrorI to track drift.",
-                "color": "yellow",
-                "actions": {'I': 1.5, 'MaxErrorI': 80.0}
-            },
-            "wrong_scaling": {
-                "result": "FF0 or VFD Scaling Error",
-                "fix": "• FF0 must be 1.0 for voltage scaling.\n• Check VFD max freq >=62Hz.",
-                "color": "red",
-                "actions": {'FF0': 1.0}
-            },
-            "encoder_reading": {
-                "result": "Encoder Configuration Issue",
-                "fix": "• If negative RPM: Invert ENCODER_SCALE in INI.\n• If 0 RPM: Check physical wiring and Mesa jumpers (W10/W11).",
-                "color": "red",
-                "actions": None
-            },
-
-            # --- MOTION BRANCH (§9, §12) ---
-            "motion": {
-                "question": "When does the issue occur?",
-                "options": [
-                    ("Overshoot during speed changes", "overshoot"),
-                    ("Undershoot or slow to reach speed", "slow_response"),
-                    ("Spindle stalls or trips VFD", "stall"),
-                    ("Runaway in Reverse (M4)", "runaway"),
-                    ("Integrator windup (sustained error)", "integrator_windup"),
-                ]
-            },
-            "overshoot": {
-                "result": "Aggressive Feedforward / Rate Limit",
-                "fix": "• Command is changing faster than VFD can respond.\n• Action: Reduce Accel Feedforward (FF1) and set Rate Limit.",
-                "color": "yellow",
-                "actions": {'FF1': 0.25, 'RateLimit': 1000.0}
-            },
-            "slow_response": {
-                "result": "Weak Feedforward",
-                "fix": "• Increase FF1 for better ramp tracking.\n• Check VFD accel time matches RateLimit.",
-                "color": "yellow",
-                "actions": {'FF1': 0.4}
-            },
-            "stall": {
-                "result": "Torque/Current Limit Reached",
-                "fix": "• VFD is hitting current limit or ramping too fast.\n• Manual: Increase VFD P0.11 (Accel Time).\n• Action: Reduce Rate Limit to match VFD.",
-                "color": "red",
-                "actions": {'RateLimit': 800.0}
-            },
-            "runaway": {
-                "result": "Missing ABS Component (Critical)",
-                "fix": "• PID needs positive feedback even in reverse.\n• Manual: Verify 'abs' component is linked to feedback in HAL.\n• THIS IS A SAFETY CRITICAL CONFIGURATION ISSUE.",
-                "color": "red",
-                "actions": None
-            },
-            "integrator_windup": {
-                "result": "Integrator Windup",
-                "fix": "• Reduce MaxErrorI to 50.\n• Verify limit2 is active and check for large sustained errors.",
-                "color": "orange",
-                "actions": {'MaxErrorI': 50.0}
-            },
-
-            # --- HARDWARE BRANCH (§12) ---
-            "hardware": {
-                "question": "Select the hardware symptom:",
-                "options": [
-                    ("No Spindle Movement", "no_movement"),
-                    ("No Encoder Counts", "no_counts"),
-                    ("VFD Faults (Er.XX)", "vfd_fault"),
-                    ("Mesa Card LEDs", "mesa_leds"),
-                ]
-            },
-            "no_movement": {
-                "result": "Enable/Signal Chain Broken",
-                "fix": "• Check spindle-enable signal (halshow).\n• Verify VFD P0.01=1 (Terminal Control).\n• Check analog scaling (0-10V).",
-                "color": "red",
-                "actions": None
-            },
-            "no_counts": {
-                "result": "Encoder Signal Loss",
-                "fix": "• Check 5V power at encoder connector.\n• Check Mesa Jumpers: W10, W11, W13 must be RIGHT (Diff).\n• Try filter=0 temporarily.",
-                "color": "red",
-                "actions": None
-            },
-            "vfd_fault": {
-                "result": "VFD Parameter Mismatch",
-                "fix": "• Check P0.04 (Max Hz) >= 65Hz.\n• Check P0.11 (Accel) >= 1.5s.\n• Check P72 (Torque Boost) = 0.",
-                "color": "orange",
-                "actions": None
-            },
-            "mesa_leds": {
-                "result": "Status Information",
-                "fix": "• Green = Solid (Power OK)\n• Red = Blinking (Watchdog OK)\n• If Red Solid: FPGA configuration failed (check power/cable).",
-                "color": "green",
-                "actions": None
-            },
-
-            # --- THREADING BRANCH (§10) ---
-            "threading": {
-                "question": "What threading problem?",
-                "options": [
-                    ("No Index Pulse", "no_index"),
-                    ("At-Speed Not Asserting", "no_at_speed"),
-                    ("Bad Threads (Loss of Sync)", "bad_threads"),
-                ]
-            },
-            "no_index": {
-                "result": "Index Configuration",
-                "fix": "• Check encoder Z channel wiring.\n• Verify hm2 encoder counter-mode=0.",
-                "color": "red",
-                "actions": None
-            },
-            "no_at_speed": {
-                "result": "Tolerance Too Tight",
-                "fix": "• Set AT_SPEED_TOLERANCE = 20 RPM in INI.\n• Check Deadband not too tight.",
-                "color": "orange",
-                "actions": {'Deadband': 15.0}
-            },
-            "bad_threads": {
-                "result": "Sync Loss During Cut",
-                "fix": "• Check for oscillation or droop during cut.\n• Increase I-gain for better stiffness.",
-                "color": "yellow",
-                "actions": {'I': 1.5}
-            },
-
-            # --- PERFORMANCE BRANCH (§12) ---
-            "performance": {
-                "question": "What performance issue?",
-                "options": [
-                    ("Unexpected Realtime Delay", "realtime_delay"),
-                    ("VFD Slow Ramp / Response", "vfd_ramp"),
-                ]
-            },
-            "realtime_delay": {
-                "result": "Realtime Delay",
-                "fix": "• Run latency-histogram test.\n• Disable CPU frequency scaling.\n• Check for competing processes.\n• Consider isolcpus kernel parameter.",
-                "color": "orange",
-                "actions": None
-            },
-            "vfd_ramp": {
-                "result": "VFD Ramp Mismatch",
-                "fix": "• Match RateLimit to VFD accel/decel times.\n• Action: Set RateLimit to 1200 RPM/s.",
-                "color": "yellow",
-                "actions": {'RateLimit': 1200.0}
-            },
-        }
-        return nodes.get(node_id)
+        return WIZARD_TREE.get(node_id)
 
 
 # =============================================================================
@@ -375,77 +371,114 @@ class TroubleshooterTab:
         """Setup live parameter health check."""
         frame = ttk.LabelFrame(parent, text="System Health Audit", padding="10")
         frame.pack(fill=tk.X, padx=5, pady=5)
-        
-        self.audit_labels: Dict[str, tuple] = {}
-        
+
         # Grid layout for audit items
+        self.audit_frame_inner = ttk.Frame(frame)
+        self.audit_frame_inner.pack(fill=tk.X, pady=(0, 10))
+
         headers = ["Parameter", "Current", "Baseline", "Status"]
         for col, text in enumerate(headers):
-            ttk.Label(frame, text=text, font=("TkDefaultFont", 9, "bold")).grid(
+            ttk.Label(self.audit_frame_inner, text=text, font=("TkDefaultFont", 9, "bold")).grid(
                 row=0, column=col, sticky="w", padx=5, pady=2)
-        
-        audit_params = ['P', 'I', 'D', 'FF0', 'FF1', 'Deadband', 
-                        'MaxErrorI', 'MaxCmdD', 'RateLimit', 'FilterGain']
-        
-        for row, param in enumerate(audit_params, 1):
-            ttk.Label(frame, text=param).grid(row=row, column=0, sticky="w", padx=5)
-            
-            lbl_cur = ttk.Label(frame, text="--", width=8, font=("TkFixedFont", 10))
-            lbl_cur.grid(row=row, column=1, sticky="w", padx=5)
-            
+
+        self.audit_params = ['P', 'I', 'D', 'FF0', 'FF1', 'Deadband',
+                             'MaxErrorI', 'MaxCmdD', 'RateLimit', 'FilterGain']
+
+        self.audit_rows: Dict[str, List[tk.Widget]] = {}
+        self.audit_labels: Dict[str, Tuple[ttk.Label, ttk.Label]] = {}
+
+        for row_idx, param in enumerate(self.audit_params, 1):
+            lbl_name = ttk.Label(self.audit_frame_inner, text=param)
+            lbl_cur = ttk.Label(self.audit_frame_inner, text="--", width=8, font=("TkFixedFont", 10))
+
             base_val = BASELINE_PARAMS.get(param, 0)
-            ttk.Label(frame, text=f"{base_val}").grid(row=row, column=2, sticky="w", padx=5)
-            
-            lbl_stat = ttk.Label(frame, text="", width=25)
-            lbl_stat.grid(row=row, column=3, sticky="w", padx=5)
-            
+            lbl_base = ttk.Label(self.audit_frame_inner, text=f"{base_val}")
+
+            lbl_stat = ttk.Label(self.audit_frame_inner, text="", width=25)
+
+            lbl_name.grid(row=row_idx, column=0, sticky="w", padx=5)
+            lbl_cur.grid(row=row_idx, column=1, sticky="w", padx=5)
+            lbl_base.grid(row=row_idx, column=2, sticky="w", padx=5)
+            lbl_stat.grid(row=row_idx, column=3, sticky="w", padx=5)
+
             self.audit_labels[param] = (lbl_cur, lbl_stat)
-        
-        # Summary row
-        summary_row = len(audit_params) + 1
+            self.audit_rows[param] = [lbl_name, lbl_cur, lbl_base, lbl_stat]
+
+        # Summary and Buttons
         self.audit_summary = ttk.Label(frame, text="", font=("TkDefaultFont", 9, "italic"))
-        self.audit_summary.grid(row=summary_row, column=0, columnspan=4, 
-                                sticky="w", padx=5, pady=(5, 0))
-        
-        # Button row
+        self.audit_summary.pack(fill=tk.X, padx=5, pady=(0, 10))
+
         btn_frame = ttk.Frame(frame)
-        btn_frame.grid(row=summary_row + 1, column=0, columnspan=4, pady=10)
-        
-        ttk.Button(btn_frame, text="Run Audit", 
+        btn_frame.pack(fill=tk.X)
+
+        ttk.Button(btn_frame, text="Run Audit (Sort by Severity)",
                    command=self._run_audit).pack(side=tk.LEFT, padx=5)
         ttk.Button(btn_frame, text="Reset to Baseline",
                    command=self._reset_to_baseline).pack(side=tk.LEFT, padx=5)
-        
+
         # Status label
         self.status_label = ttk.Label(frame, text="", foreground="gray")
-        self.status_label.grid(row=summary_row + 2, column=0, columnspan=4, sticky="w", padx=5)
-        
+        self.status_label.pack(side=tk.LEFT, padx=10)
+
     def _run_audit(self):
-        """Compare current HAL values against Guide v5.3 recommendations."""
+        """
+        Compare current HAL values against recommendations.
+        Sorts results so Critical (Red) items appear at the top.
+        """
         if not self.hal.is_connected and not self.hal.is_mock:
             self._show_status("Not connected to HAL")
             return
 
-        warnings = 0
-        
-        for param, (lbl_cur, lbl_stat) in self.audit_labels.items():
+        audit_results = []
+
+        for param in self.audit_params:
             val = self.hal.get_param(param)
-            lbl_cur.config(text=f"{val:.3f}")
-            
             msg, color = self._audit_param(param, val)
-            if msg != "OK":
+
+            severity = 0
+            if color == 'red':
+                severity = 3
+            elif color == 'orange':
+                severity = 2
+            elif color == 'yellow':
+                severity = 1
+            elif color == 'green':
+                severity = 0
+            else:
+                severity = -1
+
+            audit_results.append({
+                'param': param,
+                'val': val,
+                'msg': msg,
+                'color': color,
+                'severity': severity
+            })
+
+        audit_results.sort(key=lambda x: x['severity'], reverse=True)
+
+        warnings = 0
+        for row_idx, res in enumerate(audit_results, 1):
+            param = res['param']
+            widgets = self.audit_rows[param]
+
+            for col_idx, widget in enumerate(widgets):
+                widget.grid(row=row_idx, column=col_idx, sticky="w", padx=5)
+
+            lbl_cur, lbl_stat = self.audit_labels[param]
+            lbl_cur.config(text=f"{res['val']:.3f}")
+            lbl_stat.config(text=res['msg'], foreground=res['color'])
+
+            if res['severity'] > 0:
                 warnings += 1
-            
-            lbl_stat.config(text=msg, foreground=color)
-        
-        # Update summary
+
         if warnings == 0:
             self.audit_summary.config(text="All parameters within recommended ranges",
                                        foreground="green")
         else:
-            self.audit_summary.config(text=f"{warnings} warning(s) detected - review above",
+            self.audit_summary.config(text=f"{warnings} issue(s) detected - listed by severity",
                                        foreground="orange")
-        
+
         self._show_status("Audit complete")
     
     def _audit_param(self, param: str, val: float) -> tuple:
@@ -616,23 +649,33 @@ class TroubleshooterTab:
         self._update_back_button()
             
     def _apply_wizard_fix(self, actions: Dict[str, float]):
-        """Apply the suggested fixes to HAL."""
+        """Apply the suggested fixes to HAL with confirmation."""
         if not self.hal.is_connected and not self.hal.is_mock:
             messagebox.showerror("Error", "Not connected to HAL.")
             return
-            
+
+        before_values = {k: self.hal.get_param(k) for k in actions}
+
         msg = "Apply the following parameter changes?\n\n"
         for k, v in actions.items():
-            msg += f"  {k}: {v}\n"
-            
+            current = before_values[k]
+            msg += f"  {k}: {current} ➜ {v}\n"
+
         if messagebox.askyesno("Apply Fix", msg):
             success = True
             for param, value in actions.items():
                 if not self.hal.set_param(param, value):
                     success = False
-            
+
             if success:
-                messagebox.showinfo("Success", "Parameters updated successfully.")
+                after_values = {k: self.hal.get_param(k) for k in actions}
+                diff_lines = ["Changes applied:"]
+                for param in actions:
+                    diff_lines.append(
+                        f"  {param}: {before_values[param]} ➜ {after_values[param]}"
+                    )
+
+                messagebox.showinfo("Success", "\n".join(diff_lines))
                 self._run_audit()
             else:
                 messagebox.showerror("Error", "Failed to set one or more parameters.")
@@ -717,12 +760,13 @@ class TroubleshooterTab:
     
     def _filter_symptoms(self):
         """Filter symptom library based on search text."""
-        search_text = self.search_var.get().lower()
-        
+        search_text = self.search_var.get().strip().lower()
+        tokens = search_text.split()
+
         for widget, (title, solution, _) in zip(self._symptom_widgets, self._symptom_data):
-            if not search_text:
-                widget.pack(fill=tk.X, pady=2, padx=2)
-            elif search_text in title.lower() or search_text in solution.lower():
+            haystack = f"{title} {solution}".lower()
+
+            if not tokens or all(token in haystack for token in tokens):
                 widget.pack(fill=tk.X, pady=2, padx=2)
             else:
                 widget.pack_forget()
