@@ -652,6 +652,52 @@ class HalInterface:
         except Exception as e:
             logger.error(f"Error reading {pin_name}: {e}")
             return 0.0
+
+    def _read_hal_pins_bulk(self, pin_names: List[str]) -> Dict[str, float]:
+        """Read multiple pins in a single halcmd invocation."""
+        if not pin_names:
+            return {}
+
+        values: Dict[str, float] = {}
+        targets = set(pin_names)
+
+        try:
+            result = self._run_halcmd(['-s', '-T', 'show', 'pin'], timeout=1.5)
+        except subprocess.TimeoutExpired:
+            logger.error("Timeout reading HAL pins (bulk)")
+            return values
+        except Exception as e:
+            logger.error(f"Error running bulk halcmd: {e}")
+            return values
+
+        if result.returncode != 0:
+            logger.warning(f"halcmd bulk read failed: {result.stderr}")
+            return values
+
+        for line in result.stdout.splitlines():
+            parts = line.strip().split()
+            if len(parts) < 5:
+                continue
+
+            name = parts[-1]
+            if name not in targets:
+                continue
+
+            raw_value = parts[-2]
+            try:
+                values[name] = self._parse_hal_value(raw_value)
+            except ValueError as e:
+                logger.error(f"Invalid bulk value for {name}: {e}")
+            except Exception as e:
+                logger.error(f"Error parsing bulk value for {name}: {e}")
+
+        if values:
+            now = time.monotonic()
+            with self._lock:
+                for pin, val in values.items():
+                    self._cache[pin] = CachedValue(val, now)
+
+        return values
     
     def get_all_values(self) -> Dict[str, float]:
         """
@@ -662,20 +708,32 @@ class HalInterface:
         """
         start_time = time.monotonic()
         values = {}
-        
+
         if self.is_mock:
             # Single physics update for all values
             with self._lock:
                 if self._physics_engine:
                     self._mock_values = self._physics_engine.update()
-                
+
                 for key, pin in MONITOR_PINS.items():
                     values[key] = self._mock_values.get(pin, 0.0)
         else:
-            # Read each pin
+            # Map unique pins to their keys to avoid duplicate reads
+            pin_map: Dict[str, List[str]] = {}
             for key, pin in MONITOR_PINS.items():
-                values[key] = self.get_pin_value(pin)
-        
+                pin_map.setdefault(pin, []).append(key)
+
+            # Bulk read pins to minimize halcmd calls
+            bulk_values = self._read_hal_pins_bulk(list(pin_map.keys()))
+
+            for pin, keys in pin_map.items():
+                val = bulk_values.get(pin)
+                if val is None:
+                    # Fallback to individual read if missing from bulk output
+                    val = self.get_pin_value(pin)
+                for key in keys:
+                    values[key] = val
+
         # Track performance
         elapsed = time.monotonic() - start_time
         self._read_times.append(elapsed)
