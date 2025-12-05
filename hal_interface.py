@@ -165,8 +165,12 @@ class PhysicsParameters:
     thermal_time_constant_min: float = field(default_factory=lambda: _get_spec_value(MOTOR_SPECS, 'thermal_time_const_min', 20.0))
     rate_limit_rpm_s: float = field(default_factory=lambda: _get_spec_value(BASELINE_PARAMS, 'RateLimit', 1200.0))
     filter_gain: float = 0.5
-    # Max RPM based on VFD max frequency for a 4-pole motor: (120 * max_freq) / 4
-    max_rpm: float = field(default_factory=lambda: (120.0 * _get_spec_value(VFD_SPECS, 'max_freq_hz', 60.0)) / 4)
+    # Max RPM scales the synchronous speed (at base frequency) by the VFD's max frequency.
+    max_rpm: float = field(
+        default_factory=lambda: _get_spec_value(MOTOR_SPECS, 'sync_speed_rpm', 1800.0)
+        * (_get_spec_value(VFD_SPECS, 'max_freq_hz', 60.0)
+           / _get_spec_value(VFD_SPECS, 'base_freq_hz', 60.0))
+    )
 
 
 # =============================================================================
@@ -186,12 +190,18 @@ class MockPhysicsEngine:
     - Fault conditions
     """
     
-    def __init__(self, state: MockState, physics_params: Optional[PhysicsParameters] = None):
+    def __init__(
+        self,
+        state: MockState,
+        physics_params: Optional[PhysicsParameters] = None,
+        deterministic_dt: Optional[float] = None,
+    ):
         self.state = state
         self.physics = physics_params or PhysicsParameters()
         self._last_update_mono = time.monotonic()
+        self._fixed_dt = deterministic_dt if deterministic_dt is not None else UPDATE_INTERVAL_MS / 1000.0
         # Deterministic noise for repeatable tests
-        random.seed(0)
+        self._rng = random.Random(0)
     
     def update(self) -> Dict[str, float]:
         """
@@ -203,7 +213,9 @@ class MockPhysicsEngine:
         dt = min(now - self._last_update_mono, 0.5)  # Cap dt to avoid large jumps
         self._last_update_mono = now
 
-        if dt <= 0:
+        if self._fixed_dt is not None:
+            dt = self._fixed_dt
+        elif dt <= 0:
             dt = UPDATE_INTERVAL_MS / 1000.0
         
         # Get current state
@@ -274,7 +286,7 @@ class MockPhysicsEngine:
             else self.state.last_direction.value
         )
         polarity_mult = -1 if self.state.polarity_reversed else 1
-        command_sign = command_dir
+        command_sign = command_dir * polarity_mult
 
         # === PID SIMULATION ===
         FF0 = params.get('FF0', 1.0)
@@ -299,8 +311,8 @@ class MockPhysicsEngine:
             d_term = D * (error - self.state.prev_error) / max(dt, 1e-6)
         self.state.prev_error = error
 
-        ff1_term = FF1 * command_sign * (limited_cmd - self.state.prev_limited_cmd) / max(dt, 1e-6)
-        self.state.prev_limited_cmd = limited_cmd
+        ff1_term = FF1 * (signed_limited_cmd - self.state.prev_limited_cmd) / max(dt, 1e-6)
+        self.state.prev_limited_cmd = signed_limited_cmd
 
         pid_correction = p_term + self.state.error_i + d_term
         vfd_output = signed_limited_cmd * FF0 + ff1_term + pid_correction
@@ -314,11 +326,11 @@ class MockPhysicsEngine:
             current_rpm = current_rpm * (1 - alpha) + motor_target * alpha
         
         # === ENCODER SIMULATION WITH FILTERING ===
-        base_noise = random.gauss(0, self.physics.max_noise_rpm / 3) if not self.state.encoder_fault else 0
+        base_noise = self._rng.gauss(0, self.physics.max_noise_rpm / 3) if not self.state.encoder_fault else 0
         dpll_noise = 0.0
-        
+
         if self.state.dpll_disabled and current_rpm < 200:
-            dpll_noise = random.gauss(0, self.physics.low_speed_noise_rpm)
+            dpll_noise = self._rng.gauss(0, self.physics.low_speed_noise_rpm)
         
         noise = base_noise + dpll_noise
         
@@ -351,7 +363,7 @@ class MockPhysicsEngine:
         filtered_rpm = self.state.rpm_filtered
         signed_rpm = filtered_rpm * dir_mult * polarity_mult
         signed_rpm_raw = measured_rpm * dir_mult * polarity_mult
-        abs_rpm = abs(filtered_rpm)
+        abs_rpm = abs(signed_rpm)
         encoder_scale = -4096 if self.state.polarity_reversed else 4096
         signed_cmd_raw = target * command_sign
         signed_cmd_limited = signed_limited_cmd
