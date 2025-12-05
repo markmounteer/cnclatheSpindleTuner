@@ -28,7 +28,7 @@ Test Categories:
        - Watchdog Test (Mock)
 """
 
-from .base import BaseTest, PerformanceTargets, TARGETS, ProcedureDescription
+from .base import BaseTest, PerformanceTargets, TARGETS, ProcedureDescription, TestDescription
 
 
 class _TkUnavailable:
@@ -79,6 +79,7 @@ __all__ = [
     'PerformanceTargets',
     'TARGETS',
     'ProcedureDescription',
+    'TestDescription',
 
     # Individual test classes
     'SignalChainTest',
