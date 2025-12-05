@@ -1,9 +1,7 @@
 # Potential Features Register
 **Directory:** /home/user/cnclatheSpindleTuner/
-**Last Updated:** 2025-12-05 20:30 UTC
-**Total Entries:** 16 | **New:** 16 | **Under Review:** 0 | **Resolved:** 0
-**Last Updated:** 2025-12-05 19:30 UTC
-**Total Entries:** 19 | **New:** 19 | **Under Review:** 0 | **Resolved:** 0
+**Last Updated:** 2025-12-05 21:30 UTC
+**Total Entries:** 21 | **New:** 21 | **Under Review:** 0 | **Resolved:** 0
 
 ## Summary Index
 | ID | Status | Priority | Source File | Title | Submitted |
@@ -35,6 +33,8 @@
 | FEAT-20251205-017 | 🆕 New | 🟢 Low | hal_interface.py | Introduce Data Models for Returned Telemetry | 2025-12-05 |
 | FEAT-20251205-018 | 🆕 New | 🟢 Low | hal_interface.py | Split INI Handler Responsibilities and Add Atomic Writes | 2025-12-05 |
 | FEAT-20251205-019 | 🆕 New | 🟢 Low | hal_interface.py | Make Configuration Injectable for Testing | 2025-12-05 |
+| FEAT-20251205-020 | 🆕 New | 🟢 Low | config.py | Add Default Field to TuningParamSpec | 2025-12-05 |
+| FEAT-20251205-021 | 🆕 New | 🟢 Low | config.py | Add Literal Type Aliases for Config Keys | 2025-12-05 |
 
 ---
 
@@ -983,5 +983,100 @@ MockPhysicsEngine(config: Config = default_config)
 **Review History:**
 - 2025-12-05 | Architecture Review Agent | Submitted comment.
 - 2025-12-05 | Claude Opus 4 | Evaluated as feature suggestion; added to register.
+
+---
+
+### FEAT-20251205-020 Add Default Field to TuningParamSpec
+
+| Field | Value |
+|-------|-------|
+| Status | 🆕 New |
+| Source File | config.py |
+| Location | Lines 80-105 (TuningParamSpec and TUNING_PARAMS) |
+| Submitted By | Config Architecture Agent |
+| Evaluated By | Claude Opus 4 |
+| Submitted | 2025-12-05 |
+| Priority | 🟢 Low |
+| Duplicate Of | N/A |
+
+**Description:** Add a `default` field to `TuningParamSpec` NamedTuple and automatically derive `BASELINE_PARAMS` from `TUNING_PARAMS`, eliminating the need to maintain two parallel data structures.
+
+**Context:** Currently, baseline values are defined separately in `BASELINE_PARAMS` (lines 112-123) while parameter metadata is defined in `TUNING_PARAMS` (lines 94-105). This separation requires keeping both in sync manually.
+
+**Original Agent Rationale:** The submitting agent argued this "eliminates drift when someone updates one but forgets the other" by making `BASELINE_PARAMS` derived automatically:
+```python
+# Add default to TuningParamSpec
+class TuningParamSpec(NamedTuple):
+    hal_pin: str
+    description: str
+    min_val: float
+    max_val: float
+    step: float
+    ini_section: str
+    ini_key: str
+    default: float  # NEW
+
+# Derive baseline automatically
+BASELINE_PARAMS = {k: spec.default for k, spec in TUNING_PARAMS.items()}
+```
+
+**Evaluator Assessment:** This is a valid DRY (Don't Repeat Yourself) principle application. However, the current separation has benefits: explicit `BASELINE_PARAMS` is easier to read and modify without navigating through `TuningParamSpec` definitions. The test suite (`test_config.py`) should catch sync issues.
+
+**Implementation Considerations:**
+- Requires updating `TuningParamSpec` NamedTuple (adds 10th field)
+- Would need to update all `TuningParamSpec(...)` calls in TUNING_PARAMS
+- Type hints remain compatible (adds `default: float` field)
+- Backward compatibility: existing code accessing tuple indices would need updating
+- Risk: Makes `TUNING_PARAMS` definitions longer and harder to scan visually
+
+**Review History:**
+- 2025-12-05 | Config Architecture Agent | Submitted as DRY improvement.
+- 2025-12-05 | Claude Opus 4 | Evaluated as feature suggestion; added to register.
+
+---
+
+### FEAT-20251205-021 Add Literal Type Aliases for Config Keys
+
+| Field | Value |
+|-------|-------|
+| Status | 🆕 New |
+| Source File | config.py |
+| Location | After imports (line 16) |
+| Submitted By | Config Architecture Agent |
+| Evaluated By | Claude Opus 4 |
+| Submitted | 2025-12-05 |
+| Priority | 🟢 Low |
+| Duplicate Of | N/A |
+
+**Description:** Define `Literal` type aliases for commonly-used string keys to catch typos at static analysis time while preserving the current string-based API.
+
+**Context:** Multiple string literals are repeated throughout the codebase (e.g., `"SPINDLE_0"`, `"P"`, `"I"`, `"baseline"`, `"cmd_raw"`). Typos in these strings cause silent failures.
+
+**Original Agent Rationale:** The submitting agent proposed:
+```python
+from typing import Literal
+
+MonitorKey = Literal["cmd_raw", "cmd_limited", "feedback", "feedback_raw", ...]
+ParamName = Literal["P", "I", "D", "FF0", "FF1", "Deadband", ...]
+PresetName = Literal["baseline", "conservative", "aggressive"]
+
+# Usage in function signatures:
+def get_preset(name: PresetName) -> Preset: ...
+def get_monitor_pin(name: MonitorKey, default: Optional[str] = None) -> str: ...
+```
+
+**Evaluator Assessment:** This differs from FEAT-20251205-011 (Enums) in that Literal types don't change runtime behavior - they only add type hints. Type checkers like mypy would catch invalid string literals at analysis time. This is a low-risk enhancement that improves developer experience.
+
+**Implementation Considerations:**
+- Non-breaking change: runtime behavior unchanged
+- Requires Python 3.8+ (already satisfied)
+- Adds ~15 lines of type alias definitions
+- Benefits are visible only when using mypy or similar tools
+- Must keep Literal types synchronized with actual dict keys
+- Alternative: Use `typing.get_args()` to validate at test time
+
+**Review History:**
+- 2025-12-05 | Config Architecture Agent | Submitted as type safety improvement.
+- 2025-12-05 | Claude Opus 4 | Evaluated as feature suggestion; distinct from Enum approach in FEAT-20251205-011; added to register.
 
 ---
