@@ -161,10 +161,8 @@ class DataLogger:
             self.recorded_data.clear()
             self._start_time_mono = None
             self.time_buffer.clear()
-            self.cmd_buffer.clear()
-            self.feedback_buffer.clear()
-            self.error_buffer.clear()
-            self.errorI_buffer.clear()
+            for buf in self.trace_buffers.values():
+                buf.clear()
 
     def set_recording(self, enabled: bool) -> None:
         """Enable or disable data recording."""

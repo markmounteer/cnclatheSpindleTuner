@@ -1,4 +1,4 @@
-"""Smoke tests for CI - verifies basic imports work correctly.
+"""Smoke tests for CI - verify basic imports work correctly.
 
 These are pytest-style unit tests that verify the application code can be
 imported without errors. The ``tests/`` directory contains procedure suite

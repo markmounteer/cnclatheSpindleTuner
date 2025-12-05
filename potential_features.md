@@ -1,56 +1,49 @@
-# [Potential Features Register]
-**Last Updated:** 2025-12-05 17:48 UTC
+# Potential Features Register
+**Directory:** /workspace/cnclatheSpindleTuner/
+**Last Updated:** 2025-12-05 18:13 UTC
 **Total Entries:** 8 | **New:** 8 | **Under Review:** 0 | **Resolved:** 0
 
 ## Summary Index
 | ID | Status | Priority | Source File | Title | Submitted |
 |----|--------|----------|-------------|-------|-----------|
-| FEAT-20251205-001 | 🆕 New | 🟢 Low | `/dashboard.py` | Error History Export | 2025-12-05 |
-| FEAT-20251205-002 | 🆕 New | 🟢 Low | `/dashboard.py` | Speed Entry Field Validation | 2025-12-05 |
-| FEAT-20251205-003 | 🆕 New | 🟢 Low | `/dashboard.py` | Dynamic Plot Trace Label | 2025-12-05 |
-| FEAT-20251205-004 | 🆕 New | 🟢 Low | `/dashboard.py` | Fallback Chart Error Trace Scaling Indicator | 2025-12-05 |
-| FEAT-20251205-005 | 🆕 New | 🟢 Low | `/dashboard.py` | Keyboard Shortcut Help Overlay | 2025-12-05 |
-| FEAT-20251205-006 | 🆕 New | 🟢 Low | `/hal_interface.py` | Add Type Annotations for Imported Configuration Constants | 2025-12-05 |
-| FEAT-20251205-007 | 🆕 New | 🟢 Low | `/hal_interface.py` | Add `__all__` Export List | 2025-12-05 |
-| FEAT-20251205-008 | 🆕 New | 🟡 Medium | `/hal_interface.py` | Implement Optional HAL Reconnection Attempts | 2025-12-05 |
+| FEAT-20251205-001 | 🆕 New | 🟢 Low | dashboard.py | Error History Export | 2025-12-05 |
+| FEAT-20251205-002 | 🆕 New | 🟢 Low | dashboard.py | Speed Entry Field Validation | 2025-12-05 |
+| FEAT-20251205-003 | 🆕 New | 🟢 Low | dashboard.py | Dynamic Plot Trace Label | 2025-12-05 |
+| FEAT-20251205-004 | 🆕 New | 🟢 Low | dashboard.py | Fallback Chart Error Trace Scaling Indicator | 2025-12-05 |
+| FEAT-20251205-005 | 🆕 New | 🟢 Low | dashboard.py | Keyboard Shortcut Help Overlay | 2025-12-05 |
+| FEAT-20251205-006 | 🆕 New | 🟢 Low | hal_interface.py | Add Type Annotations for Imported Configuration Constants | 2025-12-05 |
+| FEAT-20251205-007 | 🆕 New | 🟢 Low | hal_interface.py | Add `__all__` Export List | 2025-12-05 |
+| FEAT-20251205-008 | 🆕 New | 🟡 Medium | hal_interface.py | Implement Optional HAL Reconnection Attempts | 2025-12-05 |
 
 ---
 
 ## Entries
-
-### dashboard.py
-
----
 
 ### FEAT-20251205-001 Error History Export
 
 | Field | Value |
 |-------|-------|
 | Status | 🆕 New |
-| Source File | `/dashboard.py` |
+| Source File | dashboard.py |
 | Location | Lines 404–430 |
 | Submitted By | Code Review Agent |
 | Submitted | 2025-12-05 |
 | Priority | 🟢 Low |
-| Duplicate Of | — |
+| Duplicate Of | N/A |
 
-**Description:**
-Add option to export raw error history data for external analysis.
+**Description:** Add an option to export raw error history data for external analysis.
 
-**Context:**
-Statistics panel (lines 404-430) tracks error history but only displays aggregated stats.
+**Context:** The statistics panel tracks error history but only displays aggregated metrics.
 
-**Rationale:**
-Advanced users may want to perform custom analysis on error patterns. Exporting raw data would enable use of external tools for deeper statistical analysis.
+**Rationale:** Exporting raw data would let advanced users perform custom analysis with external tools.
 
 **Implementation Considerations:**
-- Could add export button to stats panel
-- Consider memory implications of larger history buffers
-- Format options: CSV, JSON, or plain text
-- May need to limit export size or add pagination for large histories
+- Add an export control to the statistics panel.
+- Choose formats such as CSV, JSON, or plain text.
+- Manage memory for large history buffers and consider limits on export size.
 
 **Review History:**
-- 2025-12-05 | System | Entry migrated to standardized register format
+- 2025-12-05 | System | Entry migrated to standardized register format.
 
 ---
 
@@ -59,29 +52,26 @@ Advanced users may want to perform custom analysis on error patterns. Exporting 
 | Field | Value |
 |-------|-------|
 | Status | 🆕 New |
-| Source File | `/dashboard.py` |
+| Source File | dashboard.py |
 | Location | Line 441 |
 | Submitted By | Code Review Agent |
 | Submitted | 2025-12-05 |
 | Priority | 🟢 Low |
-| Duplicate Of | — |
+| Duplicate Of | N/A |
 
-**Description:**
-Add input validation to prevent non-numeric characters from being entered in the speed entry field.
+**Description:** Add input validation to prevent non-numeric characters in the speed entry field.
 
-**Context:**
-Line 441 - Speed entry accepts any text input; validation only happens when attempting to convert to int (lines 1266-1269, 1280-1281).
+**Context:** Validation currently occurs only when converting input to an integer during use.
 
-**Rationale:**
-Would provide immediate feedback to users rather than silently failing or defaulting to 1000 RPM.
+**Rationale:** Immediate feedback would reduce confusion and prevent silent fallback to default speeds.
 
 **Implementation Considerations:**
-- Could use `validatecommand` with `%P` substitution or bind to `KeyRelease` events
-- Need to consider paste operations
-- Should handle edge cases like empty input, leading zeros, negative values
+- Use `validatecommand` or event bindings to restrict input.
+- Handle paste operations and empty input gracefully.
+- Decide how to treat negatives and leading zeros.
 
 **Review History:**
-- 2025-12-05 | System | Entry migrated to standardized register format
+- 2025-12-05 | System | Entry migrated to standardized register format.
 
 ---
 
@@ -90,32 +80,26 @@ Would provide immediate feedback to users rather than silently failing or defaul
 | Field | Value |
 |-------|-------|
 | Status | 🆕 New |
-| Source File | `/dashboard.py` |
+| Source File | dashboard.py |
 | Location | Line 523 |
 | Submitted By | Code Review Agent |
 | Submitted | 2025-12-05 |
 | Priority | 🟢 Low |
-| Duplicate Of | — |
+| Duplicate Of | N/A |
 
-**Description:**
-Update the plot mode label dynamically based on which traces are actually visible.
+**Description:** Update the plot mode label dynamically based on which traces are visible.
 
-**Context:**
-Line 523 - Plot mode label is hardcoded to "Plot: Command, Feedback, Error, Integrator".
+**Context:** The plot label is currently hardcoded to list four traces.
 
-**Rationale:**
-Would accurately reflect current plot state and help users understand what they're viewing.
+**Rationale:** A dynamic label would reflect the active traces and reduce confusion.
 
 **Implementation Considerations:**
-- Would need to update label in `_update_trace_visibility()` method
-- Consider performance if called frequently
-- Label length may vary; ensure UI can accommodate different lengths
-
-**Related Entries:**
-- See ERR-20251205-002 for the related error entry about hardcoded label mismatch.
+- Update the label within `_update_trace_visibility()` or equivalent logic.
+- Ensure the UI can accommodate varying label lengths.
+- Consider performance if updates occur frequently.
 
 **Review History:**
-- 2025-12-05 | System | Entry migrated to standardized register format
+- 2025-12-05 | System | Entry migrated to standardized register format.
 
 ---
 
@@ -124,29 +108,26 @@ Would accurately reflect current plot state and help users understand what they'
 | Field | Value |
 |-------|-------|
 | Status | 🆕 New |
-| Source File | `/dashboard.py` |
+| Source File | dashboard.py |
 | Location | Lines 1016–1020 |
 | Submitted By | Code Review Agent |
 | Submitted | 2025-12-05 |
 | Priority | 🟢 Low |
-| Duplicate Of | — |
+| Duplicate Of | N/A |
 
-**Description:**
-Add a separate Y-axis or legend indicator for error scale in fallback mode.
+**Description:** Add a Y-axis indicator or legend note that the error trace is scaled in fallback mode.
 
-**Context:**
-Lines 1016-1020 - Error trace is scaled by 5x and centered at 1000 RPM for visibility in the canvas fallback chart.
+**Context:** The canvas fallback chart scales error by 5x and centers it for visibility without disclosing the scaling.
 
-**Rationale:**
-The current 5x scaling may confuse users who don't realize error values are magnified.
+**Rationale:** Users may misinterpret magnified error values without a visible scaling note.
 
 **Implementation Considerations:**
-- Would require additional canvas elements
-- Need to maintain simplicity for systems without matplotlib
-- Could use a small legend or annotation rather than a full secondary axis
+- Add a small legend annotation rather than a full secondary axis.
+- Keep the canvas display simple for environments without matplotlib.
+- Ensure the indicator does not clutter the existing layout.
 
 **Review History:**
-- 2025-12-05 | System | Entry migrated to standardized register format
+- 2025-12-05 | System | Entry migrated to standardized register format.
 
 ---
 
@@ -155,33 +136,26 @@ The current 5x scaling may confuse users who don't realize error values are magn
 | Field | Value |
 |-------|-------|
 | Status | 🆕 New |
-| Source File | `/dashboard.py` |
+| Source File | dashboard.py |
 | Location | Lines 1143–1156 |
 | Submitted By | Code Review Agent |
 | Submitted | 2025-12-05 |
 | Priority | 🟢 Low |
-| Duplicate Of | — |
+| Duplicate Of | N/A |
 
-**Description:**
-Add a help button or tooltip that shows available keyboard shortcuts.
+**Description:** Provide an in-app overlay summarizing available keyboard shortcuts.
 
-**Context:**
-Lines 1143-1156 - Keyboard shortcuts exist (Space=stop, F5=step test, 1-4=speed presets) but are only documented in module docstring.
+**Context:** Shortcuts are handled in code but not documented within the UI.
 
-**Rationale:**
-Discoverability - users may not know these shortcuts exist.
+**Rationale:** Visible shortcut help would improve discoverability and usability.
 
 **Implementation Considerations:**
-- Could be a simple button that shows a messagebox or tooltip
-- Minimal code addition
-- Consider adding a "?" button in the toolbar or a Help menu item
+- Add a help dialog or tooltip listing shortcuts and actions.
+- Ensure the overlay is accessible without conflicting with existing shortcuts.
+- Keep the overlay optional to avoid clutter.
 
 **Review History:**
-- 2025-12-05 | System | Entry migrated to standardized register format
-
----
-
-### hal_interface.py
+- 2025-12-05 | System | Entry migrated to standardized register format.
 
 ---
 
@@ -190,39 +164,26 @@ Discoverability - users may not know these shortcuts exist.
 | Field | Value |
 |-------|-------|
 | Status | 🆕 New |
-| Source File | `/hal_interface.py` |
-| Location | Lines 37–40 |
+| Source File | hal_interface.py |
+| Location | Multiple references |
 | Submitted By | Code Review Agent |
 | Submitted | 2025-12-05 |
 | Priority | 🟢 Low |
-| Duplicate Of | — |
+| Duplicate Of | N/A |
 
-**Description:**
-Add type comments or use explicit type annotations to document the expected types of imported configuration constants.
+**Description:** Add explicit type annotations for configuration constants imported from `config.py`.
 
-**Context:**
-Lines 37-40 import `MONITOR_PINS`, `TUNING_PARAMS`, `BASELINE_PARAMS`, `UPDATE_INTERVAL_MS`, `MOTOR_SPECS`, and `VFD_SPECS` without local type annotations.
+**Context:** Constants are used throughout the module without annotations, which can reduce type checker clarity.
 
-**Rationale:**
-Improves code readability and helps developers understand the data structures being used without needing to reference config.py.
+**Rationale:** Explicit types would aid static analysis and documentation.
 
 **Implementation Considerations:**
-- Low risk, purely additive change
-- Can be done as type comments or by creating type aliases in the module
-- Example:
-  ```python
-  from config import (
-      MONITOR_PINS,      # Dict[str, str]
-      TUNING_PARAMS,     # Dict[str, TuningParamSpec]
-      BASELINE_PARAMS,   # Dict[str, float]
-      UPDATE_INTERVAL_MS,  # int
-      MOTOR_SPECS,       # Dict[str, Any]
-      VFD_SPECS          # Dict[str, Any]
-  )
-  ```
+- Import `Final` or explicit types for shared constants.
+- Ensure annotations stay synchronized with `config.py` definitions.
+- Keep runtime behavior unchanged.
 
 **Review History:**
-- 2025-12-05 | System | Entry migrated to standardized register format
+- 2025-12-05 | System | Entry migrated to standardized register format.
 
 ---
 
@@ -231,45 +192,26 @@ Improves code readability and helps developers understand the data structures be
 | Field | Value |
 |-------|-------|
 | Status | 🆕 New |
-| Source File | `/hal_interface.py` |
-| Location | After imports section |
+| Source File | hal_interface.py |
+| Location | Module scope |
 | Submitted By | Code Review Agent |
 | Submitted | 2025-12-05 |
 | Priority | 🟢 Low |
-| Duplicate Of | — |
+| Duplicate Of | N/A |
 
-**Description:**
-Add an explicit `__all__` list to document the public API.
+**Description:** Define `__all__` to clarify the public API of `hal_interface.py`.
 
-**Context:**
-The module does not define an `__all__` list, making the public API implicit.
+**Context:** The module currently exports everything by default.
 
-**Rationale:**
-Explicit exports improve code documentation, IDE autocompletion, and help prevent accidental use of internal functions. This follows the pattern used in config.py.
+**Rationale:** An explicit export list would communicate supported symbols and aid tooling.
 
 **Implementation Considerations:**
-- Low risk, purely additive change
-- Should be placed after the imports section
-- Suggested contents:
-  ```python
-  __all__ = [
-      'ConnectionState',
-      'SpindleDirection',
-      'CachedValue',
-      'MockState',
-      'PhysicsParameters',
-      'MockPhysicsEngine',
-      'HalInterface',
-      'IniFileHandler',
-      'IS_WINDOWS',
-      'IS_LINUX',
-      'HAS_HALCMD',
-      'HAS_LINUXCNC',
-  ]
-  ```
+- Enumerate public classes, functions, and constants in `__all__`.
+- Keep backward compatibility for consumers relying on implicit exports.
+- Update documentation if necessary.
 
 **Review History:**
-- 2025-12-05 | System | Entry migrated to standardized register format
+- 2025-12-05 | System | Entry migrated to standardized register format.
 
 ---
 
@@ -278,35 +220,25 @@ Explicit exports improve code documentation, IDE autocompletion, and help preven
 | Field | Value |
 |-------|-------|
 | Status | 🆕 New |
-| Source File | `/hal_interface.py` |
-| Location | Module-level (connection handling) |
+| Source File | hal_interface.py |
+| Location | Connection handling |
 | Submitted By | Code Review Agent |
 | Submitted | 2025-12-05 |
 | Priority | 🟡 Medium |
-| Duplicate Of | — |
+| Duplicate Of | N/A |
 
-**Description:**
-Add configurable reconnection attempts with backoff before switching to mock mode, and optionally allow periodic reconnection checks while in mock fallback.
+**Description:** Attempt HAL reconnection a configurable number of times before falling back to mock mode.
 
-**Context:**
-On failed halcmd verification, the interface falls back to mock mode without retrying a real HAL connection.
+**Context:** On connection failure the module immediately switches to mock mode without retries.
 
-**Rationale:**
-Helps maintain real hardware control when transient connectivity issues occur, aligning behavior with the stated auto-reconnect improvement in the module docstring.
+**Rationale:** Limited retry attempts could recover from transient issues while retaining the mock fallback.
 
 **Implementation Considerations:**
-- Add retry counters and delays configurable via settings
-- Ensure thread safety around connection state transitions
-- Avoid blocking critical paths by running retries in a background thread or using non-blocking checks
-
-**Related Entries:**
-- See ERR-20251205-004 for the related error entry about the auto-reconnect documentation claim.
+- Add configurable retry count and delay.
+- Ensure retries do not block the UI excessively.
+- Preserve the existing mock fallback path when retries are exhausted.
 
 **Review History:**
-- 2025-12-05 | System | Entry migrated to standardized register format
+- 2025-12-05 | System | Entry migrated to standardized register format.
 
 ---
-
-## Archive
-
-*No resolved entries yet.*
