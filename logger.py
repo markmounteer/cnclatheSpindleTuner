@@ -15,7 +15,7 @@ from collections import deque
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Deque, Dict, List, Optional, Tuple
+from typing import Any, Deque, Dict, List, Optional, Sequence, Tuple
 
 from config import UPDATE_INTERVAL_MS, HISTORY_DURATION_S
 
@@ -176,6 +176,15 @@ class DataLogger:
         """Get number of recorded points."""
         with self._lock:
             return len(self.recorded_data)
+
+    def log_sample(self, sample: Dict[str, float]) -> None:
+        """Log a single sample (alias for add_sample for protocol compatibility)."""
+        self.add_sample(sample)
+
+    def log_samples(self, samples: Sequence[Dict[str, float]]) -> None:
+        """Log multiple samples at once."""
+        for sample in samples:
+            self.add_sample(sample)
 
     # ---------------------------------------------------------------------
     # CSV export
