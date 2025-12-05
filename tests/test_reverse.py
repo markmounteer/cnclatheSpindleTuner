@@ -11,7 +11,7 @@ _HAS_TKINTER = importlib.util.find_spec("tkinter") is not None
 if _HAS_TKINTER:
     from tkinter import messagebox
 else:
-    messagebox = None
+    messagebox = None  # type: ignore[assignment]
 
 from config import MONITOR_PINS
 from tests.base import BaseTest, ProcedureDescription

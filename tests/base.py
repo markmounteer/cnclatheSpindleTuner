@@ -46,6 +46,8 @@ class HalProtocol(Protocol):
 
     def set_param(self, param_name: str, value: float) -> bool: ...
 
+    def set_mock_fault(self, fault_type: str, enabled: bool) -> None: ...
+
 
 class DataLoggerProtocol(Protocol):
     """Protocol for data logging backends."""

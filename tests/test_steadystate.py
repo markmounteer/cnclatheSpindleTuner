@@ -8,6 +8,7 @@ import csv
 import os
 import time
 from datetime import datetime
+from typing import Optional
 
 from config import MONITOR_PINS
 from tests.base import BaseTest, ProcedureDescription, TARGETS
@@ -82,7 +83,7 @@ Longer durations (120s+) are required to characterize thermal drift.""",
             ]
         )
 
-    def run(self, duration: int = None, rpm: float = None):
+    def run(self, duration: Optional[int] = None, rpm: Optional[float] = None):
         """Start steady-state test with optional duration and RPM overrides."""
         if duration is not None:
             self.set_duration(duration)

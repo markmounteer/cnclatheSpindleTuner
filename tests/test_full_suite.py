@@ -11,7 +11,7 @@ try:
     from tkinter import messagebox
     _HAS_TKINTER = True
 except ImportError:
-    messagebox = None
+    messagebox = None  # type: ignore[assignment]
     _HAS_TKINTER = False
 
 from tests.base import BaseTest, ProcedureDescription
