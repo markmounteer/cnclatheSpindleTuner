@@ -1039,20 +1039,18 @@ class DashboardTab:
     def _update_statistics(self, error: float):
         """Update statistics with new error value."""
         self.error_history.append(error)
-        
+
         # Track session peak (absolute max error since reset)
         self.session_peak_error = max(self.session_peak_error, abs(error))
-        
-        if len(self.error_history) < 5:
-            return
-        
+
+        # Use whatever samples we have instead of waiting for a minimum window
         errors = list(self.error_history)
-        
+
         avg = sum(errors) / len(errors)
         min_err = min(errors)
         max_err = max(errors)
-        
-        # Standard deviation
+
+        # Standard deviation (robust even with a single sample)
         variance = sum((e - avg) ** 2 for e in errors) / len(errors)
         std = variance ** 0.5
         
