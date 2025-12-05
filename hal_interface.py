@@ -298,8 +298,10 @@ class MockPhysicsEngine:
         
         # Low-pass filter on feedback (simulates actual filtering in HAL)
         # Use params (user-adjustable) with physics default as fallback
+        # Clamp to valid range [0.0, 1.0] to prevent filter instability
         filter_gain = params.get('FilterGain', self.physics.filter_gain)
-        self.state.rpm_filtered = (self.state.rpm_filtered * (1 - filter_gain) + 
+        filter_gain = max(0.0, min(1.0, filter_gain))
+        self.state.rpm_filtered = (self.state.rpm_filtered * (1 - filter_gain) +
                                    (current_rpm + noise) * filter_gain)
         
         # === REVOLUTIONS TRACKING ===
@@ -431,12 +433,13 @@ class HalInterface:
         # 1. Explicitly requested (mock=True)
         # 2. Running on Windows (no LinuxCNC support)
         # 3. halcmd not available on Linux
-        # 4. Neither hal module nor linuxcnc module available
+        # Note: We do NOT require the Python hal/linuxcnc modules since
+        # the primary interface is halcmd getp/setp. The Python modules
+        # are only needed for MDI commands via linuxcnc.command().
         use_mock = (
-            mock or 
-            IS_WINDOWS or 
-            not HAS_HALCMD or 
-            not (HAS_HAL_MODULE or HAS_LINUXCNC)
+            mock or
+            IS_WINDOWS or
+            not HAS_HALCMD
         )
         
         if use_mock:
@@ -521,44 +524,71 @@ class HalInterface:
             timeout=timeout,
         )
     
+    def _verify_halcmd_connection(self) -> bool:
+        """
+        Verify that halcmd can actually communicate with a running HAL instance.
+
+        Returns:
+            True if halcmd can talk to HAL, False otherwise
+        """
+        try:
+            # Use 'halcmd show' to verify HAL is running and accessible
+            # This command lists components and should always work if HAL is up
+            result = self._run_halcmd(['show', 'comp'], timeout=2.0)
+            if result.returncode == 0 and result.stdout.strip():
+                logger.debug("halcmd verification successful")
+                return True
+            else:
+                logger.warning(f"halcmd verification failed: {result.stderr or 'no output'}")
+                return False
+        except subprocess.TimeoutExpired:
+            logger.warning("halcmd verification timed out")
+            return False
+        except Exception as e:
+            logger.warning(f"halcmd verification error: {e}")
+            return False
+
     def _connect(self) -> bool:
         """Connect to LinuxCNC HAL."""
         with self._lock:
             self._state = ConnectionState.CONNECTING
             self._connect_attempts += 1
-            connected_to_something = False
-            
+
+            # First, verify halcmd can actually talk to HAL
+            # This is the primary interface - Python modules are optional
+            if not self._verify_halcmd_connection():
+                self._last_error = "halcmd cannot communicate with HAL (is LinuxCNC running?)"
+                logger.error(self._last_error)
+                self._state = ConnectionState.ERROR
+                # Fall back to mock mode
+                self._init_mock_mode()
+                return False
+
             try:
-                # Try LinuxCNC command interface
+                # Try LinuxCNC command interface for MDI support (optional)
                 if HAS_LINUXCNC:
-                    self._linuxcnc_cmd = linuxcnc.command()
-                    self._linuxcnc_stat = linuxcnc.stat()
-                    self._linuxcnc_stat.poll()
-                    logger.info("Connected to LinuxCNC command interface")
-                    connected_to_something = True
+                    try:
+                        self._linuxcnc_cmd = linuxcnc.command()
+                        self._linuxcnc_stat = linuxcnc.stat()
+                        self._linuxcnc_stat.poll()
+                        logger.info("Connected to LinuxCNC command interface (MDI available)")
+                    except Exception as e:
+                        # MDI won't work, but halcmd I/O is still fine
+                        logger.warning(f"LinuxCNC command interface unavailable: {e}")
+                        self._linuxcnc_cmd = None
+                        self._linuxcnc_stat = None
 
-                # Note: we primarily interact via halcmd, so HAL component creation
-                # is optional. If the HAL module is present, treat that as a valid
-                # connection signal but avoid creating an unused component.
-                if HAS_HAL_MODULE:
-                    connected_to_something = True
-                    logger.info("HAL module available; using halcmd for IO without component creation")
+                # halcmd verification passed - we're connected
+                self._state = ConnectionState.CONNECTED
+                self._last_error = None
+                logger.info("Connected to HAL via halcmd")
+                return True
 
-                # Only mark as connected if we actually connected to something
-                if connected_to_something:
-                    self._state = ConnectionState.CONNECTED
-                    self._last_error = None
-                    return True
-                else:
-                    # No HAL/LinuxCNC available, fall back to mock
-                    logger.warning("No HAL or LinuxCNC interface available, using mock mode")
-                    self._init_mock_mode()
-                    return False
-                
             except Exception as e:
                 self._last_error = str(e)
                 logger.error(f"HAL connection failed: {e}")
-                
+                self._state = ConnectionState.ERROR
+
                 # Fall back to mock mode
                 self._init_mock_mode()
                 return False
@@ -676,20 +706,30 @@ class HalInterface:
             return 0.0
 
     def _read_hal_pins_bulk(self, pin_names: List[str]) -> Dict[str, float]:
-        """Read multiple pins in a single halcmd invocation."""
+        """
+        Read multiple pins in a single halcmd invocation.
+
+        Uses 'getp' commands fed via stdin to a single halcmd process.
+        This is more reliable than 'show pin' which has variable output
+        format (connected pins include arrows and signal names).
+        """
         if not pin_names:
             return {}
 
         values: Dict[str, float] = {}
 
+        # Deduplicate while preserving order
         pin_list = list(dict.fromkeys(pin_names))
+
+        # Build getp commands - one per line, fed via stdin
+        # Using -s flag for terse (single value) output per command
         commands = [f"getp {pin}" for pin in pin_list]
         cmd_str = "\n".join(commands)
 
         try:
-            timeout = max(1.5, len(pin_list) * 0.1)
+            timeout = max(2.0, len(pin_list) * 0.15)
             result = subprocess.run(
-                [self._halcmd_path],
+                [self._halcmd_path, '-s'],
                 input=cmd_str,
                 capture_output=True,
                 text=True,
@@ -702,22 +742,32 @@ class HalInterface:
             logger.error(f"Error running bulk halcmd: {e}")
             return values
 
-        if result.returncode != 0:
+        # Note: halcmd may return non-zero if ANY pin fails, but we still
+        # want to parse successful outputs. Log warning but continue.
+        if result.returncode != 0 and not result.stdout.strip():
             logger.warning(f"halcmd bulk read failed: {result.stderr}")
             return values
 
         lines = result.stdout.splitlines()
 
+        # Parse results - with -s flag, each getp outputs exactly one line
+        # If a pin doesn't exist, halcmd prints an error to stderr and
+        # may skip that output line, so we handle mismatched counts gracefully
         if len(lines) != len(pin_list):
-            logger.warning(
-                "Mismatch in bulk read output lines (expected %d, got %d)",
-                len(pin_list), len(lines)
+            logger.debug(
+                f"Bulk read got {len(lines)} lines for {len(pin_list)} pins "
+                f"(some pins may not exist)"
             )
+            # Fall back to individual reads if count doesn't match
+            # This ensures we don't misalign pin names with values
             return values
 
         for idx, pin in enumerate(pin_list):
+            line = lines[idx].strip()
+            if not line:
+                continue
             try:
-                values[pin] = self._parse_hal_value(lines[idx])
+                values[pin] = self._parse_hal_value(line)
             except ValueError as e:
                 logger.error(f"Invalid value for {pin} in bulk read: {e}")
             except Exception as e:
@@ -889,23 +939,29 @@ class HalInterface:
     def set_params_bulk(self, params: Dict[str, float]) -> bool:
         """
         Set multiple parameters efficiently using a single halcmd process.
-        
+
         This is faster than set_params() for many parameters as it spawns
         only one subprocess.
-        
+
         Args:
             params: Dict of parameter names to values
-            
+
         Returns:
-            True if all parameters were set successfully
+            True if ALL requested parameters were set successfully.
+            False if any parameters were unknown or failed to set.
         """
         if not params:
             return True
-        
+
+        # Track unknown parameters - return False if any are skipped
+        unknown_params = [name for name in params if name not in TUNING_PARAMS]
+        if unknown_params:
+            for name in unknown_params:
+                logger.warning(f"Unknown parameter in bulk set: {name}")
+
         if self.is_mock:
             for name, value in params.items():
                 if name not in TUNING_PARAMS:
-                    logger.warning(f"Unknown parameter in bulk set: {name}")
                     continue
 
                 _, desc, min_val, max_val, step, _, _ = TUNING_PARAMS[name]
@@ -916,9 +972,11 @@ class HalInterface:
                         f"[MOCK] Adjusted {name} from {value} -> {clamped_value}"
                     )
 
-            logger.debug(f"[MOCK] Bulk set {len(params)} params")
-            return True
-        
+            valid_count = len(params) - len(unknown_params)
+            logger.debug(f"[MOCK] Bulk set {valid_count} params")
+            # Return False if any params were unknown
+            return len(unknown_params) == 0
+
         try:
             # Build commands for stdin
             commands = []
@@ -932,10 +990,11 @@ class HalInterface:
 
                 pin_name = TUNING_PARAMS[param_name][0]
                 commands.append(f"setp {pin_name} {value}")
-            
+
             if not commands:
-                return True
-            
+                # All params were unknown - already warned above
+                return len(unknown_params) == 0
+
             cmd_str = '\n'.join(commands)
             result = subprocess.run(
                 [self._halcmd_path],
@@ -944,7 +1003,7 @@ class HalInterface:
                 text=True,
                 timeout=3
             )
-            
+
             if result.returncode == 0:
                 # Invalidate cache for all modified pins
                 with self._lock:
@@ -952,9 +1011,10 @@ class HalInterface:
                         if param_name in TUNING_PARAMS:
                             pin_name = TUNING_PARAMS[param_name][0]
                             self._cache.pop(pin_name, None)
-                
+
                 logger.info(f"Bulk set {len(commands)} params")
-                return True
+                # Return False if any params were unknown
+                return len(unknown_params) == 0
             else:
                 logger.error(f"halcmd bulk set failed: {result.stderr}")
                 return False
@@ -1079,10 +1139,11 @@ class HalInterface:
         logger.debug(f"[MOCK] {fault_type} fault: {enabled}")
     
     def reset_mock_state(self):
-        """Reset mock state to defaults."""
-        self._mock_state = MockState()
-        if self._physics_engine:
-            self._physics_engine.state = self._mock_state
+        """Reset mock state to defaults. Thread-safe."""
+        with self._lock:
+            self._mock_state = MockState()
+            if self._physics_engine:
+                self._physics_engine.state = self._mock_state
     
     # -------------------------------------------------------------------------
     # Utility Methods
