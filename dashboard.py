@@ -827,6 +827,7 @@ class DashboardTab:
         if self.ax:
             scale = self.time_scale.get()
             self.ax.set_xlim(0, scale)
+            self.plot_dirty = True
             if self.canvas:
                 self.canvas.draw_idle()
     

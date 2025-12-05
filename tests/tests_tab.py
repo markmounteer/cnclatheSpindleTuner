@@ -407,11 +407,15 @@ class TestsTab:
 
     def log_result(self, text: str):
         """Log text to results area."""
-        if self.results_text:
-            self.results_text.insert(tk.END, text + "\n")
-            self.results_text.see(tk.END)
-        if self.log_callback:
-            self.log_callback(text)
+        def _update():
+            if self.results_text:
+                self.results_text.insert(tk.END, text + "\n")
+                self.results_text.see(tk.END)
+            if self.log_callback:
+                self.log_callback(text)
+
+        # Ensure UI updates happen on the main thread
+        self.parent.after(0, _update)
 
     def clear_results(self):
         """Clear the results text area."""
