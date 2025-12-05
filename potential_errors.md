@@ -1,5 +1,5 @@
-# Potential Errors Register
-**Last Updated:** 2025-12-05 12:00 UTC
+# [Potential Errors Register]
+**Last Updated:** 2025-12-05 17:48 UTC
 **Total Entries:** 4 | **New:** 4 | **Under Review:** 0 | **Resolved:** 0
 
 ## Summary Index
@@ -7,8 +7,8 @@
 |----|--------|----------|-------------|-------|-----------|
 | ERR-20251205-001 | 🆕 New | 🟡 Medium | `/dashboard.py` | Section Reference "§10.2" - Unknown Document Source | 2025-12-05 |
 | ERR-20251205-002 | 🆕 New | 🟢 Low | `/dashboard.py` | Hardcoded Plot Trace Label May Not Match Defaults | 2025-12-05 |
-| ERR-20251205-003 | 🆕 New | 🟢 Low | `/hal_interface.py` | Tuning Guide Version Reference May Be Outdated | 2025-12-05 |
 | ERR-20251205-004 | 🆕 New | 🟡 Medium | `/hal_interface.py` | Auto-Reconnect Claim May Be Inaccurate | 2025-12-05 |
+| ERR-20251205-003 | 🆕 New | 🟢 Low | `/hal_interface.py` | Tuning Guide Version Reference May Be Outdated | 2025-12-05 |
 
 ---
 
@@ -85,6 +85,35 @@ Check if PLOT_DEFAULTS matches this list; consider whether label should be dynam
 
 ---
 
+### ERR-20251205-004 Auto-Reconnect Claim May Be Inaccurate
+
+| Field | Value |
+|-------|-------|
+| Status | 🆕 New |
+| Source File | `/hal_interface.py` |
+| Location | Line 13 |
+| Submitted By | Code Review Agent |
+| Submitted | 2025-12-05 |
+| Priority | 🟡 Medium |
+| Duplicate Of | — |
+
+**Description:**
+The introductory docstring lists "Connection state management with auto-reconnect" as an improvement, but the code only falls back to mock mode on connection failure and does not appear to attempt reconnection.
+
+**Context:**
+Module docstring at line 13 claims auto-reconnect capability that may not be implemented.
+
+**Rationale:**
+Documentation claiming functionality that doesn't exist can mislead developers and users. There may be reconnection logic elsewhere in the application or planned but not present in this module.
+
+**Verification Required:**
+Confirm whether any automatic reconnection is implemented elsewhere or intended; if not, update the documentation to reflect the current behavior.
+
+**Review History:**
+- 2025-12-05 | System | Entry migrated to standardized register format
+
+---
+
 ### ERR-20251205-003 Tuning Guide Version Reference May Be Outdated
 
 | Field | Value |
@@ -110,38 +139,6 @@ Outdated version references in generated configuration files may cause confusion
 
 **Verification Required:**
 Confirm the current version of the Spindle PID Tuning Guide documentation and update the reference if outdated.
-
-**Review History:**
-- 2025-12-05 | System | Entry migrated to standardized register format
-
----
-
-### ERR-20251205-004 Auto-Reconnect Claim May Be Inaccurate
-
-| Field | Value |
-|-------|-------|
-| Status | 🆕 New |
-| Source File | `/hal_interface.py` |
-| Location | Line 13 |
-| Submitted By | Code Review Agent |
-| Submitted | 2025-12-05 |
-| Priority | 🟡 Medium |
-| Duplicate Of | — |
-
-**Description:**
-The introductory docstring lists "Connection state management with auto-reconnect" as an improvement, but the code only falls back to mock mode on connection failure and does not appear to attempt reconnection.
-
-**Context:**
-Module docstring at line 13 claims auto-reconnect capability that may not be implemented.
-
-**Rationale:**
-Documentation claiming functionality that doesn't exist can mislead developers and users. There may be reconnection logic elsewhere in the application or planned but not present in this module.
-
-**Verification Required:**
-Confirm whether any automatic reconnection is implemented elsewhere or intended; if not, update the documentation to reflect the current behavior.
-
-**Related Entries:**
-- See FEAT-20251205-008 for proposed enhancement to implement optional HAL reconnection attempts.
 
 **Review History:**
 - 2025-12-05 | System | Entry migrated to standardized register format
