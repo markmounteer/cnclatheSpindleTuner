@@ -20,6 +20,7 @@ Improvements in this version:
 """
 
 import configparser
+import os
 import logging
 import math
 import platform
@@ -718,11 +719,11 @@ class HalInterface:
                 continue
 
             value_token_idx = -2
-            if tokens[-2] in {'<=>', '<==', '=>', '==>', '<='} and len(tokens) >= 3:
+            if parts[-2] in {'<=>', '<==', '=>', '==>', '<='} and len(parts) >= 3:
                 value_token_idx = -3
 
             try:
-                raw_value = tokens[value_token_idx]
+                raw_value = parts[value_token_idx]
                 values[name] = self._parse_hal_value(raw_value)
             except (IndexError, ValueError) as e:
                 logger.error(f"Invalid bulk value for {name}: {e}")
