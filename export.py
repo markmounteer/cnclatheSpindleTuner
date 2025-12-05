@@ -237,11 +237,9 @@ class ExportTab:
 
         if filepath:
             try:
-                if self.data_logger.export_csv(Path(filepath)):
-                    messagebox.showinfo("Success", f"Data exported to:\n{filepath}")
-                    logger.info(f"CSV exported to {filepath}")
-                else:
-                    messagebox.showerror("Error", "Export failed - check logs for details.")
+                self.data_logger.export_csv(Path(filepath))
+                messagebox.showinfo("Success", f"Data exported to:\n{filepath}")
+                logger.info(f"CSV exported to {filepath}")
             except (OSError, PermissionError) as e:
                 logger.error(f"CSV export failed: {e}")
                 messagebox.showerror("Error", f"Export failed:\n{e}")
@@ -252,8 +250,13 @@ class ExportTab:
 
         Shows the INI section with options to copy to clipboard or save to file.
         """
-        params = self.get_params()
-        ini_text = self.ini_handler.generate_ini_section(params)
+        try:
+            params = self.get_params()
+            ini_text = self.ini_handler.generate_ini_section(params)
+        except Exception as e:
+            logger.error(f"Failed to generate INI configuration: {e}")
+            messagebox.showerror("Error", f"Failed to generate INI configuration:\n{e}")
+            return
 
         dialog = tk.Toplevel(self.parent)
         dialog.title("Generated INI Configuration")
@@ -444,8 +447,23 @@ class ExportTab:
         name = profile.get('name', 'Unknown')
         params = profile.get('params', {})
 
-        # Filter to only known parameters
-        known_params = {k: v for k, v in params.items() if k in BASELINE_PARAMS}
+        # Validate params is a dict
+        if not isinstance(params, dict):
+            logger.warning(f"Profile {filepath} has invalid params type: {type(params)}")
+            messagebox.showerror(
+                "Error",
+                "Profile has invalid format:\n'params' is not a dictionary."
+            )
+            return
+
+        # Filter to only known parameters with valid numeric values
+        known_params = {}
+        for k, v in params.items():
+            if k in BASELINE_PARAMS:
+                if isinstance(v, (int, float)) and not isinstance(v, bool):
+                    known_params[k] = float(v)
+                else:
+                    logger.warning(f"Skipping non-numeric parameter {k}={v!r} in {filepath}")
 
         if not known_params:
             messagebox.showwarning(
@@ -615,6 +633,21 @@ class ExportTab:
         except OSError:
             return profile_path.stem
 
+    def _get_file_mtime(self, path: Path) -> float:
+        """
+        Safely get file modification time.
+
+        Args:
+            path: Path to the file
+
+        Returns:
+            Modification time as float, or 0.0 if file is inaccessible
+        """
+        try:
+            return path.stat().st_mtime
+        except OSError:
+            return 0.0
+
     def _refresh_profiles_list(self) -> None:
         """
         Refresh the profiles listbox with recent profiles.
@@ -629,11 +662,18 @@ class ExportTab:
             return
 
         try:
-            profiles = sorted(
-                PROFILES_DIR.glob("*.json"),
-                key=lambda p: p.stat().st_mtime,
-                reverse=True
-            )
+            # Collect profile paths, filtering out inaccessible files
+            profile_files = []
+            for p in PROFILES_DIR.glob("*.json"):
+                mtime = self._get_file_mtime(p)
+                if mtime > 0:
+                    profile_files.append((p, mtime))
+                else:
+                    logger.warning(f"Skipping inaccessible profile: {p}")
+
+            # Sort by modification time (newest first)
+            profile_files.sort(key=lambda x: x[1], reverse=True)
+            profiles = [p for p, _ in profile_files]
         except OSError as e:
             logger.warning(f"Error scanning profiles directory: {e}")
             return
