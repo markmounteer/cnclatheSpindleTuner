@@ -305,6 +305,7 @@ class MockPhysicsEngine:
         # === REVOLUTIONS TRACKING ===
         rps = current_rpm / 60.0
         dir_mult = self.state.direction.value if self.state.direction != SpindleDirection.STOPPED else 0
+        command_dir = self.state.direction.value if self.state.direction != SpindleDirection.STOPPED else 1
         self.state.revolutions += rps * dt * dir_mult
         
         # === BUILD OUTPUT VALUES ===
@@ -313,6 +314,8 @@ class MockPhysicsEngine:
         signed_rpm = filtered_rpm * dir_mult * polarity_mult
         abs_rpm = abs(filtered_rpm)
         encoder_scale = -4096 if self.state.polarity_reversed else 4096
+        signed_cmd_raw = target * command_dir
+        signed_cmd_limited = limited_cmd * command_dir
         
         at_speed = abs(limited_cmd - filtered_rpm) < params.get('Deadband', 10) * 2
         external_ok = 0.0 if (self.state.encoder_fault or self.state.vfd_fault or 
@@ -326,8 +329,8 @@ class MockPhysicsEngine:
                 outputs[pin_name] = value
 
         # Command path
-        add_if_present('cmd_raw', target)
-        add_if_present('cmd_limited', limited_cmd)
+        add_if_present('cmd_raw', signed_cmd_raw)
+        add_if_present('cmd_limited', signed_cmd_limited)
 
         # Feedback path (uses filtered RPM)
         add_if_present('feedback', filtered_rpm * polarity_mult)
