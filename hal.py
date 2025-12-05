@@ -124,6 +124,8 @@ class MockState:
     
     # PID state
     error_i: float = 0.0
+    prev_error: float = 0.0
+    prev_limited_cmd: float = 0.0
     
     # Physical state
     load_pct: float = 0.0
@@ -186,7 +188,7 @@ class MockPhysicsEngine:
         now = time.monotonic()
         dt = min(now - self._last_update_mono, 0.5)  # Cap dt to avoid large jumps
         self._last_update_mono = now
-        
+
         if dt <= 0:
             dt = UPDATE_INTERVAL_MS / 1000.0
         
@@ -206,7 +208,7 @@ class MockPhysicsEngine:
             self.state.direction = SpindleDirection.STOPPED
         
         # === THERMAL TRACKING (exponential model) ===
-        thermal_tau = self.physics.thermal_time_constant_min * 60  # seconds
+        thermal_tau = max(1e-6, self.physics.thermal_time_constant_min * 60)  # seconds
         max_thermal_factor = 1.0 + (self.physics.slip_hot_pct - self.physics.slip_cold_pct) / 100
         
         if target > 0:
@@ -235,42 +237,48 @@ class MockPhysicsEngine:
         load_slip = (self.state.load_pct / 100.0) * 0.024
         thermal_slip = (self.state.thermal_factor - 1.0) * 0.03
         total_slip = base_slip + load_slip + thermal_slip
-        
+
         # === VFD DYNAMICS ===
         vfd_delay = self.physics.vfd_delay_s
         alpha = min(0.3, dt / (vfd_delay / 3))
-        
+
         # VFD fault slows response
         if self.state.vfd_fault:
             alpha *= 0.1
-        
-        motor_target = limited_cmd * (1.0 - total_slip)
-        
+
         # === PID SIMULATION ===
         FF0 = params.get('FF0', 1.0)
+        FF1 = params.get('FF1', 0.35)
         P = params.get('P', 0.1)
         I = params.get('I', 1.0)
+        D = params.get('D', 0.0)
         max_error_i = params.get('MaxErrorI', 60.0)
-        
-        # Apply feed-forward before PID so FF0 has a visible effect in the
-        # simulated response. Without this, the FF0 tuning parameter was unused
-        # and the mock behavior didn't match the real HAL control path.
-        vfd_base = limited_cmd * FF0
-        error = vfd_base - current_rpm
+
+        # Use filtered feedback to align with actual PID component behavior
+        error = limited_cmd - self.state.rpm_filtered
         p_term = P * error
-        
+
         self.state.error_i += error * dt * I
         self.state.error_i = max(-max_error_i, min(max_error_i, self.state.error_i))
-        
-        pid_correction = p_term + self.state.error_i
-        
+
+        d_term = 0.0
+        if D:
+            d_term = D * (error - self.state.prev_error) / max(dt, 1e-6)
+        self.state.prev_error = error
+
+        ff1_term = FF1 * (limited_cmd - self.state.prev_limited_cmd) / max(dt, 1e-6)
+        self.state.prev_limited_cmd = limited_cmd
+
+        pid_correction = p_term + self.state.error_i + d_term
+        vfd_output = limited_cmd * FF0 + ff1_term + pid_correction
+
         # === FINAL MOTOR RESPONSE ===
-        final_target = motor_target + pid_correction
-        
+        motor_target = vfd_output * (1.0 - total_slip)
+
         if self.state.vfd_fault:
             current_rpm = current_rpm * 0.95  # Rapid decel on fault
         else:
-            current_rpm = current_rpm * (1 - alpha) + final_target * alpha
+            current_rpm = current_rpm * (1 - alpha) + motor_target * alpha
         
         # === ENCODER SIMULATION WITH FILTERING ===
         base_noise = random.gauss(0, self.physics.max_noise_rpm / 3) if not self.state.encoder_fault else 0
@@ -311,35 +319,43 @@ class MockPhysicsEngine:
         external_ok = 0.0 if (self.state.encoder_fault or self.state.vfd_fault or 
                               self.state.estop_triggered) else 1.0
         
-        return {
-            # Command path
-            'spindle-vel-cmd-rpm-raw': target,
-            'spindle-vel-cmd-rpm-limited': limited_cmd,
-            
-            # Feedback path (uses filtered RPM)
-            'pid.s.feedback': filtered_rpm * polarity_mult,
-            'spindle-vel-fb-rpm': signed_rpm,
-            'spindle-vel-fb-rpm-abs': abs_rpm,
-            
-            # PID internals
-            'pid.s.error': limited_cmd - filtered_rpm,
-            'pid.s.errorI': self.state.error_i,
-            'pid.s.output': vfd_base + pid_correction,
-            
-            # Status
-            'spindle-is-at-speed': 1.0 if at_speed else 0.0,
-            'encoder-watchdog-is-armed': 1.0 if limited_cmd > 50 else 0.0,
-            'encoder-fault': 1.0 if self.state.encoder_fault else 0.0,
-            'spindle-enable': 1.0 if target > 0 else 0.0,
-            
-            # Threading
-            'spindle.0.revs': self.state.revolutions,
-            
-            # Hardware status
-            'hm2_7i76e.0.dpll.01.timer-us': 0.0 if self.state.dpll_disabled else 100.0,
-            'external-ok': external_ok,
-            'hm2_7i76e.0.encoder.00.scale': encoder_scale,
-        }
+        outputs: Dict[str, float] = {}
+
+        def add_if_present(key: str, value: float):
+            pin_name = MONITOR_PINS.get(key)
+            if pin_name:
+                outputs[pin_name] = value
+
+        # Command path
+        add_if_present('cmd_raw', target)
+        add_if_present('cmd_limited', limited_cmd)
+
+        # Feedback path (uses filtered RPM)
+        add_if_present('feedback', filtered_rpm * polarity_mult)
+        add_if_present('feedback_raw', signed_rpm)
+        add_if_present('feedback_abs', abs_rpm)
+
+        # PID internals
+        add_if_present('error', limited_cmd - filtered_rpm)
+        add_if_present('errorI', self.state.error_i)
+        add_if_present('output', vfd_output)
+
+        # Status
+        add_if_present('at_speed', 1.0 if at_speed else 0.0)
+        add_if_present('watchdog', 1.0 if limited_cmd > 50 else 0.0)
+        add_if_present('encoder_fault', 1.0 if self.state.encoder_fault else 0.0)
+        add_if_present('spindle_on', 1.0 if target > 0 else 0.0)
+
+        # Threading
+        add_if_present('spindle_revs', self.state.revolutions)
+
+        # Hardware status / safety pins
+        add_if_present('dpll_timer', 0.0 if self.state.dpll_disabled else 100.0)
+        add_if_present('external_ok', external_ok)
+        add_if_present('safety_chain', external_ok)
+        add_if_present('encoder_scale', encoder_scale)
+
+        return outputs
 
 
 # =============================================================================
@@ -668,8 +684,10 @@ class HalInterface:
         values: Dict[str, float] = {}
         targets = set(pin_names)
 
+        args = ['-s', 'show', 'pin', '-F', '%n %v', *targets]
+
         try:
-            result = self._run_halcmd(['-s', '-T', 'show', 'pin'], timeout=1.5)
+            result = self._run_halcmd(args, timeout=1.5)
         except subprocess.TimeoutExpired:
             logger.error("Timeout reading HAL pins (bulk)")
             return values
@@ -682,15 +700,14 @@ class HalInterface:
             return values
 
         for line in result.stdout.splitlines():
-            parts = line.strip().split()
-            if len(parts) < 5:
+            parts = line.strip().split(maxsplit=1)
+            if len(parts) != 2:
                 continue
 
-            name = parts[-1]
+            name, raw_value = parts
             if name not in targets:
                 continue
 
-            raw_value = parts[-2]
             try:
                 values[name] = self._parse_hal_value(raw_value)
             except ValueError as e:
