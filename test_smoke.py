@@ -6,9 +6,6 @@ can be imported without errors. The tests/ directory contains
 application-specific spindle tuner test classes (not pytest tests).
 """
 
-import pytest
-
-
 class TestImports:
     """Verify core modules can be imported."""
 
@@ -23,9 +20,11 @@ class TestImports:
         from tests.base import BaseTest, TestDescription, TARGETS
         assert BaseTest is not None
         assert TestDescription is not None
+        assert TARGETS is not None
 
     def test_import_test_classes(self):
         """All spindle test classes should be importable."""
+        from tests.base import BaseTest
         from tests.test_signal_chain import SignalChainTest
         from tests.test_preflight import PreflightTest
         from tests.test_encoder import EncoderTest
@@ -62,6 +61,7 @@ class TestImports:
         for cls in test_classes:
             assert hasattr(cls, 'get_description'), f"{cls.__name__} missing get_description"
             assert hasattr(cls, 'run'), f"{cls.__name__} missing run"
+            assert issubclass(cls, BaseTest), f"{cls.__name__} should subclass BaseTest"
 
     def test_import_logger(self):
         """Logger module should import without error."""
@@ -84,11 +84,12 @@ class TestConfiguration:
         required_pins = ['feedback', 'error', 'output']
         for pin in required_pins:
             assert pin in MONITOR_PINS, f"Missing required pin: {pin}"
+            assert MONITOR_PINS[pin], f"Pin mapping for {pin} is empty"
 
     def test_baseline_params_not_empty(self):
         """BASELINE_PARAMS should have PID values."""
         from config import BASELINE_PARAMS
-        required_params = ['P', 'I']
+        required_params = ['P', 'I', 'D']
         for param in required_params:
             assert param in BASELINE_PARAMS, f"Missing required param: {param}"
 
