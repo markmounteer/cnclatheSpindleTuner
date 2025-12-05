@@ -98,6 +98,11 @@ class ExportTab:
             set_params_callback: Function that applies a parameter dict
             max_profiles: Maximum number of profiles to display in list
         """
+        if not _HAS_TKINTER:
+            raise ImportError(
+                "tkinter is required for ExportTab but could not be imported."
+            )
+
         self.parent = parent
         self.data_logger = data_logger
         self.ini_handler = ini_handler
