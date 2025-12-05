@@ -257,21 +257,24 @@ class TestsTab:
         lbl.pack(anchor="w")
 
     def _add_list_section(self, parent, title: str, items: list):
-        """Add a bulleted or numbered list section."""
+        """Add a bulleted or numbered list section in two columns."""
         frame = ttk.LabelFrame(parent, text=title, padding="10")
         frame.pack(fill=tk.X, padx=10, pady=5)
 
         numbered_titles = ["Procedure", "Prerequisites", "Expected Results"]
-        if title in numbered_titles:
-            for i, item in enumerate(items, 1):
-                lbl = ttk.Label(frame, text=f"{i}. {item.strip()}",
-                                wraplength=500, justify=tk.LEFT)
-                lbl.pack(anchor="w")
-        else:
-            for item in items:
-                lbl = ttk.Label(frame, text=f"• {item.strip()}",
-                                wraplength=500, justify=tk.LEFT)
-                lbl.pack(anchor="w")
+        column_count = 2
+        columns_frame = ttk.Frame(frame)
+        columns_frame.pack(fill=tk.BOTH, expand=True)
+        for col in range(column_count):
+            columns_frame.columnconfigure(col, weight=1)
+
+        for idx, item in enumerate(items):
+            row = idx // column_count
+            col = idx % column_count
+            label_prefix = f"{idx + 1}. " if title in numbered_titles else "• "
+            text = f"{label_prefix}{item.strip()}"
+            lbl = ttk.Label(columns_frame, text=text, wraplength=250, justify=tk.LEFT)
+            lbl.grid(row=row, column=col, sticky="w", padx=5, pady=2)
 
     def _add_step_controls(self, parent, test_key: str):
         """Add step test specific controls."""
