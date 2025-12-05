@@ -1,5 +1,46 @@
 ## 2025-12-05 — Feature Implementation
 
+**Implemented:** FEAT-20251205-003 — Dynamic Plot Trace Label
+
+**Source File:** /home/user/cnclatheSpindleTuner/dashboard.py
+
+**Description:**
+Updated the plot mode label to dynamically reflect which traces are currently visible. Previously, the label was hardcoded to "Plot: Command, Feedback, Error, Integrator" regardless of which traces the user had enabled. Now the label updates in real-time when trace visibility checkboxes are toggled.
+
+**Changes Made:**
+- Added `_update_plot_mode_label()` method (lines 1439-1450) that builds a dynamic label from visible traces using PLOT_TRACES configuration
+- Modified `_update_trace_visibility()` (line 1433) to call the new label update method after updating line visibility
+- Added initialization call (line 582) to set the correct label on startup based on default trace visibility settings
+
+**Original Request:**
+- Submitted By: Code Review Agent
+- Submitted: 2025-12-05
+- Priority: 🟢 Low
+- Register: /home/user/cnclatheSpindleTuner/potential_features.md
+
+**Implementation:**
+- Implemented By: Claude Opus 4 (claude-opus-4-5-20251101)
+- Implemented: 2025-12-05
+
+**Selection Rationale:**
+Selected from 25 eligible features across 2 registers (root: 20, reference: 5). Multiple features tied at highest score (2.2). Tiebreakers applied: all had same Impact (Low), Effort (Minimal), and Date (2025-12-05). Selected alphabetically by Feature ID (FEAT-20251205-003 was first among tied features in root register).
+
+**Evaluation Score:**
+- Impact: 1/4 (Low priority - minor UX improvement)
+- Effort: 3/3 (Minimal - small UI label change)
+- Dependencies: 3/3 (None - self-contained)
+- Clarity: 3/3 (Clear - well-defined scope)
+- Total: 2.20
+
+**Competing Features:**
+- FEAT-20251205-004 — Score: 2.20 — Fallback Chart Error Trace Scaling Indicator
+- FEAT-20251205-007 — Score: 2.20 — Add `__all__` Export List
+- FEAT-20251205-021 — Score: 2.20 — Add Literal Type Aliases for Config Keys
+
+---
+
+## 2025-12-05 — Feature Implementation
+
 **Implemented:** FEAT-20251205-002 — Speed Entry Field Validation
 
 **Source File:** /home/user/cnclatheSpindleTuner/dashboard.py

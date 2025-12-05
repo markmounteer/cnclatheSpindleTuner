@@ -1,13 +1,12 @@
 # Potential Features Register
 **Directory:** /home/user/cnclatheSpindleTuner/
-**Last Updated:** 2025-12-05 23:45 UTC
-**Total Entries:** 20 | **New:** 20 | **Under Review:** 0 | **Resolved:** 0
+**Last Updated:** 2025-12-05 23:55 UTC
+**Total Entries:** 19 | **New:** 19 | **Under Review:** 0 | **Resolved:** 0
 
 ## Summary Index
 | ID | Status | Priority | Source File | Title | Submitted |
 |----|--------|----------|-------------|-------|-----------|
 | FEAT-20251205-001 | 🆕 New | 🟢 Low | dashboard.py | Error History Export | 2025-12-05 |
-| FEAT-20251205-003 | 🆕 New | 🟢 Low | dashboard.py | Dynamic Plot Trace Label | 2025-12-05 |
 | FEAT-20251205-004 | 🆕 New | 🟢 Low | dashboard.py | Fallback Chart Error Trace Scaling Indicator | 2025-12-05 |
 | FEAT-20251205-005 | 🆕 New | 🟢 Low | dashboard.py | Keyboard Shortcut Help Overlay | 2025-12-05 |
 | FEAT-20251205-006 | 🆕 New | 🟢 Low | hal_interface.py | Add Type Annotations for Imported Configuration Constants | 2025-12-05 |
@@ -61,34 +60,6 @@
 - Add an export control to the statistics panel.
 - Choose formats such as CSV, JSON, or plain text.
 - Manage memory for large history buffers and consider limits on export size.
-
-**Review History:**
-- 2025-12-05 | System | Entry migrated to standardized register format.
-
----
-
-### FEAT-20251205-003 Dynamic Plot Trace Label
-
-| Field | Value |
-|-------|-------|
-| Status | 🆕 New |
-| Source File | dashboard.py |
-| Location | Line 523 |
-| Submitted By | Code Review Agent |
-| Submitted | 2025-12-05 |
-| Priority | 🟢 Low |
-| Duplicate Of | N/A |
-
-**Description:** Update the plot mode label dynamically based on which traces are visible.
-
-**Context:** The plot label is currently hardcoded to list four traces.
-
-**Rationale:** A dynamic label would reflect the active traces and reduce confusion.
-
-**Implementation Considerations:**
-- Update the label within `_update_trace_visibility()` or equivalent logic.
-- Ensure the UI can accommodate varying label lengths.
-- Consider performance if updates occur frequently.
 
 **Review History:**
 - 2025-12-05 | System | Entry migrated to standardized register format.
