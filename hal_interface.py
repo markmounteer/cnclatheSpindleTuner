@@ -947,13 +947,13 @@ class HalInterface:
             params: Dict of parameter names to values
 
         Returns:
-            True if ALL requested parameters were set successfully.
-            False if any parameters were unknown or failed to set.
+            True if at least one known parameter was set successfully.
+            Unknown parameters are ignored (with a warning).
         """
         if not params:
             return True
 
-        # Track unknown parameters - return False if any are skipped
+        # Track unknown parameters (warn but do not fail)
         unknown_params = [name for name in params if name not in TUNING_PARAMS]
         if unknown_params:
             for name in unknown_params:
@@ -974,8 +974,8 @@ class HalInterface:
 
             valid_count = len(params) - len(unknown_params)
             logger.debug(f"[MOCK] Bulk set {valid_count} params")
-            # Return False if any params were unknown
-            return len(unknown_params) == 0
+            # Success if any known params were set
+            return valid_count > 0
 
         try:
             # Build commands for stdin
@@ -993,7 +993,7 @@ class HalInterface:
 
             if not commands:
                 # All params were unknown - already warned above
-                return len(unknown_params) == 0
+                return False
 
             cmd_str = '\n'.join(commands)
             result = subprocess.run(
@@ -1013,8 +1013,7 @@ class HalInterface:
                             self._cache.pop(pin_name, None)
 
                 logger.info(f"Bulk set {len(commands)} params")
-                # Return False if any params were unknown
-                return len(unknown_params) == 0
+                return True
             else:
                 logger.error(f"halcmd bulk set failed: {result.stderr}")
                 return False
