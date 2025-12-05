@@ -2,9 +2,11 @@
 Forward PID Test (Guide §6.2)
 
 Verifies forward (M3) spindle operation with PID active.
+Checks for target accuracy, stability (jitter), and at-speed signal.
 """
 
 import time
+import statistics
 
 from config import MONITOR_PINS
 from tests.base import BaseTest, TestDescription
@@ -16,6 +18,13 @@ class ForwardTest(BaseTest):
     TEST_NAME = "Forward PID Test"
     GUIDE_REF = "Guide §6.2"
 
+    # Configuration
+    TARGET_RPM = 1000
+    SETTLE_TIME = 4.0        # Seconds to wait before sampling
+    SAMPLE_WINDOW = 2.0      # Duration of sampling
+    TOLERANCE_RPM = 20       # Allow +/- 20 RPM error (2%)
+    MAX_JITTER = 15.0        # Max allowed standard deviation
+
     @classmethod
     def get_description(cls) -> TestDescription:
         return TestDescription(
@@ -24,9 +33,9 @@ class ForwardTest(BaseTest):
             purpose="""
 Test forward (M3) spindle operation with full PID control active.
 This verifies that the closed-loop system achieves target speed,
-the at-speed indicator works, and steady-state error is acceptable.
+the at-speed indicator works, and steady-state error is minimal.
 
-Run this test after open-loop check to confirm PID is working.""",
+It calculates Standard Deviation to detect PID oscillation.""",
 
             prerequisites=[
                 "Open Loop Check completed successfully",
@@ -36,30 +45,30 @@ Run this test after open-loop check to confirm PID is working.""",
 
             procedure=[
                 "1. Click 'Run Test' to begin",
-                "2. Spindle started forward at 1000 RPM (M3 S1000)",
-                "3. Wait 4 seconds for settling",
-                "4. Feedback, error, and at-speed sampled",
-                "5. Analyze if target reached with acceptable error",
+                f"2. Spindle commands forward to {cls.TARGET_RPM} RPM",
+                f"3. Wait {cls.SETTLE_TIME}s for settling",
+                "4. Feedback, error, and stability sampled",
+                "5. Stop spindle and analyze performance",
             ],
 
             expected_results=[
-                "Feedback reaches ~1000 RPM (within 10%)",
+                f"RPM within {cls.TOLERANCE_RPM} RPM of target",
+                f"Stability (StdDev) < {cls.MAX_JITTER}",
                 "At-speed indicator becomes TRUE",
-                "Steady-state error < 20 RPM",
-                "Integrator shows slip compensation value",
+                "Steady-state error close to 0",
             ],
 
             troubleshooting=[
-                "Speed low: Check I-gain and maxerrorI limits",
-                "No at-speed: Adjust AT_SPEED_TOLERANCE in INI",
-                "Large error: Increase I-gain or check FF0",
-                "Oscillation: Reduce P-gain (see Guide §9.1)",
+                "Speed low/high: Check P-gain or max output scaling",
+                "Oscillation (High StdDev): Reduce P-gain, check D-gain",
+                "Slow to settle: Increase I-gain",
+                "No At-speed: Adjust AT_SPEED_TOLERANCE in INI file",
             ],
 
             safety_notes=[
-                "Test runs at 1000 RPM",
+                f"Test runs at {cls.TARGET_RPM} RPM",
                 "Forward rotation (M3)",
-                "Spindle stops after test",
+                "Ensure chuck key is removed",
             ]
         )
 
@@ -72,72 +81,94 @@ Run this test after open-loop check to confirm PID is working.""",
     def _sequence(self):
         """Execute forward PID test."""
         self.log_header()
-        self.update_progress(0, "Starting spindle forward...")
+        
+        # 1. Start Spindle
+        self.update_progress(0, f"Commanding M3 S{self.TARGET_RPM}...")
+        self.hal.send_mdi(f"M3 S{self.TARGET_RPM}")
+        self.log_result(f"Command: M3 S{self.TARGET_RPM}")
+        
+        # 2. Wait for settling (with abort check)
+        start_wait = time.time()
+        while time.time() - start_wait < self.SETTLE_TIME:
+            elapsed = time.time() - start_wait
+            progress = 10 + (elapsed / self.SETTLE_TIME * 40) # Scale 10-50%
+            self.update_progress(progress, "Accelerating & Settling...")
+            
+            if self.test_abort:
+                self.hal.send_mdi("M5")
+                self.end_test()
+                return
+            time.sleep(0.1)
 
-        self.hal.send_mdi("M3 S1000")
-        self.log_result("Starting M3 S1000...")
-        self.update_progress(10, "Accelerating...")
+        # 3. Sampling Phase
+        self.update_progress(50, "Sampling feedback stability...")
+        
+        # Sample feedback and error pins
+        _, fb_samples = self.sample_signal(MONITOR_PINS['feedback'], self.SAMPLE_WINDOW, 0.05)
+        _, err_samples = self.sample_signal(MONITOR_PINS['error'], self.SAMPLE_WINDOW, 0.05)
 
-        time.sleep(4)
-
-        if self.test_abort:
-            self.hal.send_mdi("M5")
-            self.end_test()
-            return
-
-        self.update_progress(50, "Sampling feedback...")
-
-        _, fb_samples = self.sample_signal(MONITOR_PINS['feedback'], 2.0, 0.1)
-        _, err_samples = self.sample_signal(MONITOR_PINS['error'], 1.0, 0.1)
-
+        # Snapshot instantaneous pins
         at_speed = self.hal.get_pin_value(MONITOR_PINS['at_speed'])
         errorI = self.hal.get_pin_value(MONITOR_PINS['errorI'])
 
+        # 4. Stop Spindle
         self.hal.send_mdi("M5")
         self.update_progress(80, "Analyzing results...")
 
-        if fb_samples:
-            fb_avg = sum(fb_samples) / len(fb_samples)
-            fb_noise = max(fb_samples) - min(fb_samples)
+        # 5. Data Analysis
+        if not fb_samples:
+            self.log_result("[ERROR] No data collected.")
+            self.end_test()
+            return
+
+        # Calculate Statistics
+        fb_avg = statistics.mean(fb_samples)
+        fb_min = min(fb_samples)
+        fb_max = max(fb_samples)
+        # Use stdev if >1 sample, else 0
+        fb_stdev = statistics.stdev(fb_samples) if len(fb_samples) > 1 else 0
+        
+        err_avg = statistics.mean(err_samples) if err_samples else 0
+
+        # 6. Reporting
+        self.log_result(f"\n--- Analysis ---")
+        self.log_result(f"Target: {self.TARGET_RPM} RPM")
+        self.log_result(f"Actual Average: {fb_avg:.1f} RPM")
+        self.log_result(f"Range: {fb_min:.0f} to {fb_max:.0f} RPM")
+        self.log_result(f"Stability (StdDev): {fb_stdev:.2f} (Lower is better)")
+        self.log_result(f"Integrator (I-term): {errorI:.1f}")
+        self.log_result(f"At-Speed Signal: {'TRUE' if at_speed > 0.5 else 'FALSE'}")
+
+        # 7. Pass/Fail Logic
+        issues = []
+
+        # Check 1: Accuracy (Steady State Error)
+        if abs(self.TARGET_RPM - fb_avg) > self.TOLERANCE_RPM:
+            issues.append(f"Accuracy Fail: Off by {abs(self.TARGET_RPM - fb_avg):.1f} RPM")
+            self.log_result(f"[FAIL] Average RPM outside tolerance (+/-{self.TOLERANCE_RPM})")
         else:
-            fb_avg = 0
-            fb_noise = 0
+            self.log_result(f"[PASS] Accuracy within tolerance")
 
-        if err_samples:
-            err_avg = sum(err_samples) / len(err_samples)
+        # Check 2: Stability (Oscillation)
+        if fb_stdev > self.MAX_JITTER:
+            issues.append("Stability Fail: Spindle oscillating")
+            self.log_result(f"[FAIL] High Jitter/Oscillation (StdDev: {fb_stdev:.1f})")
+            self.log_result("       -> Check P-gain (too high?) or belt tension")
         else:
-            err_avg = 0
+            self.log_result(f"[PASS] Stability acceptable")
 
-        self.log_result(f"\nResults:")
-        self.log_result(f"  Feedback: {fb_avg:.1f} RPM (noise: +/-{fb_noise/2:.1f})")
-        self.log_result(f"  Steady-state error: {err_avg:.1f} RPM")
-        self.log_result(f"  Integrator: {errorI:.1f}")
-        self.log_result(f"  At-speed: {'YES' if at_speed > 0.5 else 'NO'}")
-
-        all_ok = True
-
-        if fb_avg > 900:
-            self.log_result("\n[OK] Speed reached target")
+        # Check 3: At-Speed Signal
+        if at_speed < 0.5:
+            issues.append("Signal Fail: at-speed pin false")
+            self.log_result("[FAIL] LinuxCNC did not report 'at-speed'")
         else:
-            self.log_result(f"\n[FAIL] Speed low: {fb_avg:.0f} RPM (expected ~1000)")
-            all_ok = False
-
-        if at_speed > 0.5:
-            self.log_result("[OK] At-speed signal active")
-        else:
-            self.log_result("[WARN] At-speed signal not active")
-            all_ok = False
-
-        if abs(err_avg) < 20:
-            self.log_result(f"[OK] Error small: {err_avg:.1f} RPM")
-        else:
-            self.log_result(f"[WARN] Error large: {err_avg:.1f} RPM")
+            self.log_result("[PASS] 'at-speed' signal received")
 
         self.update_progress(100, "Complete")
 
-        if all_ok:
+        if not issues:
             self.log_footer("PASS")
         else:
-            self.log_footer("ISSUES DETECTED")
+            self.log_footer(f"FAIL ({len(issues)} issues)")
 
         self.end_test()
