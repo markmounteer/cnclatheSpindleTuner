@@ -162,25 +162,25 @@ This is the primary test for evaluating tuning quality.""",
         metrics = self.calculate_step_metrics(start, end, test_data)
 
         self.log_result(f"\nRESULTS:")
-        self.log_result(f"  Rise time (10-90%): {metrics['rise_time']:.2f} s")
-        self.log_result(f"  Settling time (2%): {metrics['settling_time']:.2f} s")
-        self.log_result(f"  Overshoot: {metrics['overshoot']:.1f}%")
-        self.log_result(f"  Steady-state error: {metrics['ss_error']:.1f} RPM")
-        self.log_result(f"  Max error during step: {metrics['max_error']:.1f} RPM")
+        self.log_result(f"  Rise time (10-90%): {metrics.rise_time_s:.2f} s")
+        self.log_result(f"  Settling time (2%): {metrics.settling_time_s:.2f} s")
+        self.log_result(f"  Overshoot: {metrics.overshoot_pct:.1f}%")
+        self.log_result(f"  Steady-state error: {metrics.steady_state_error:.1f} RPM")
+        self.log_result(f"  Max error during step: {metrics.max_error:.1f} RPM")
 
         self.log_result(f"\nASSESSMENT (Guide §7.4):")
-        self.log_result(f"  Settling: {self.assess_settling(metrics['settling_time'])}")
-        self.log_result(f"  Overshoot: {self.assess_overshoot(metrics['overshoot'])}")
-        self.log_result(f"  SS Error: {self.assess_ss_error(metrics['ss_error'])}")
+        self.log_result(f"  Settling: {self.assess_settling(metrics.settling_time_s)}")
+        self.log_result(f"  Overshoot: {self.assess_overshoot(metrics.overshoot_pct)}")
+        self.log_result(f"  SS Error: {self.assess_ss_error(metrics.steady_state_error)}")
 
         self.update_progress(100, "Complete")
 
-        if (metrics['settling_time'] <= TARGETS.settling_excellent and
-                metrics['overshoot'] <= TARGETS.overshoot_excellent):
+        if (metrics.settling_time_s <= TARGETS.settling_excellent and
+                metrics.overshoot_pct <= TARGETS.overshoot_excellent):
             self.log_footer("EXCELLENT")
             self.log_result("Fast settling, minimal overshoot")
-        elif (metrics['settling_time'] <= TARGETS.settling_good and
-              metrics['overshoot'] <= TARGETS.overshoot_good):
+        elif (metrics.settling_time_s <= TARGETS.settling_good and
+              metrics.overshoot_pct <= TARGETS.overshoot_good):
             self.log_footer("GOOD")
             self.log_result("Acceptable performance")
         else:
