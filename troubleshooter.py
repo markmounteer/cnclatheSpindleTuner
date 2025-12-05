@@ -433,6 +433,8 @@ class TroubleshooterTab:
 
         for param in self.audit_params:
             val = self.hal.get_param(param)
+            if val is None:
+                val = 0.0  # Default to 0 if parameter not found
             msg, color = self._audit_param(param, val)
 
             severity = 0
@@ -483,6 +485,9 @@ class TroubleshooterTab:
     
     def _audit_param(self, param: str, val: float) -> tuple:
         """Audit a single parameter, returning (message, color)."""
+        if val is None:
+            return ("No value", "gray")
+
         if param == 'P':
             if val > 0.3:
                 return ("HIGH - VFD delay risk", "red")
@@ -654,12 +659,15 @@ class TroubleshooterTab:
             messagebox.showerror("Error", "Not connected to HAL.")
             return
 
-        before_values = {k: self.hal.get_param(k) for k in actions}
+        before_values = {}
+        for k in actions:
+            val = self.hal.get_param(k)
+            before_values[k] = val if val is not None else 0.0
 
         msg = "Apply the following parameter changes?\n\n"
         for k, v in actions.items():
             current = before_values[k]
-            msg += f"  {k}: {current} ➜ {v}\n"
+            msg += f"  {k}: {current:.3f} ➜ {v}\n"
 
         if messagebox.askyesno("Apply Fix", msg):
             success = True
@@ -668,11 +676,14 @@ class TroubleshooterTab:
                     success = False
 
             if success:
-                after_values = {k: self.hal.get_param(k) for k in actions}
+                after_values = {}
+                for k in actions:
+                    val = self.hal.get_param(k)
+                    after_values[k] = val if val is not None else 0.0
                 diff_lines = ["Changes applied:"]
                 for param in actions:
                     diff_lines.append(
-                        f"  {param}: {before_values[param]} ➜ {after_values[param]}"
+                        f"  {param}: {before_values[param]:.3f} ➜ {after_values[param]:.3f}"
                     )
 
                 messagebox.showinfo("Success", "\n".join(diff_lines))
@@ -757,7 +768,10 @@ class TroubleshooterTab:
             widget = self._create_symptom_entry(self.symptom_list_frame, title, solution, color)
             self._symptom_widgets.append(widget)
             self._symptom_data.append((title, solution, color))
-    
+
+        # Initially show all symptoms
+        self._filter_symptoms()
+
     def _filter_symptoms(self):
         """Filter symptom library based on search text."""
         search_text = self.search_var.get().strip().lower()
@@ -792,10 +806,10 @@ class TroubleshooterTab:
         content = tk.Frame(item, bg="white", padx=5, pady=5)
         content.pack(fill=tk.X)
         
-        tk.Label(content, text=solution, justify=tk.LEFT, bg="white", 
+        tk.Label(content, text=solution, justify=tk.LEFT, bg="white",
                  wraplength=380).pack(anchor="w")
-        
-        item.pack(fill=tk.X, pady=2, padx=2)
+
+        # Note: Don't pack here - _filter_symptoms handles visibility
         return item
 
     def _setup_vfd_checklist(self, parent: ttk.Frame):
