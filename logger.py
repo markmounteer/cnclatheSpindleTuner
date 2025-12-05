@@ -94,12 +94,18 @@ class DataLogger:
         self.recorded_data: List[DataPoint] = []
 
         # Session tracking
-        self.session_start: float = time.time()
         self._start_time_mono: Optional[float] = None
 
     # ---------------------------------------------------------------------
     # Data ingestion / retrieval
     # ---------------------------------------------------------------------
+
+    def _safe_float(self, value: Any, default: float = 0.0) -> float:
+        """Attempt to coerce a value to float, returning default on failure."""
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
 
     def add_sample(self, values: Dict[str, float]) -> None:
         """Add a new data sample in a thread-safe manner."""
@@ -112,10 +118,10 @@ class DataLogger:
 
             relative_time = now_mono - self._start_time_mono
 
-            cmd_limited = float(values.get("cmd_limited", 0.0))
-            feedback = float(values.get("feedback", 0.0))
-            error = float(values.get("error", 0.0))
-            errorI = float(values.get("errorI", 0.0))
+            cmd_limited = self._safe_float(values.get("cmd_limited", 0.0))
+            feedback = self._safe_float(values.get("feedback", 0.0))
+            error = self._safe_float(values.get("error", 0.0))
+            errorI = self._safe_float(values.get("errorI", 0.0))
 
             self.time_buffer.append(relative_time)
             self.cmd_buffer.append(cmd_limited)
@@ -130,12 +136,12 @@ class DataLogger:
                 DataPoint(
                     timestamp=now_epoch,
                     relative_time=relative_time,
-                    cmd_raw=float(values.get("cmd_raw", 0.0)),
+                    cmd_raw=self._safe_float(values.get("cmd_raw", 0.0)),
                     cmd_limited=cmd_limited,
                     feedback=feedback,
                     error=error,
                     errorI=errorI,
-                    output=float(values.get("output", 0.0)),
+                    output=self._safe_float(values.get("output", 0.0)),
                     at_speed=values.get("at_speed", 0.0) > 0.5,
                 )
             )
@@ -164,7 +170,6 @@ class DataLogger:
         """Clear recorded data (export history) and reset timing."""
         with self._lock:
             self.recorded_data.clear()
-            self.session_start = time.time()
             self._start_time_mono = None
 
     def set_recording(self, enabled: bool) -> None:
@@ -197,39 +202,35 @@ class DataLogger:
                 return False
             data_copy = list(self.recorded_data)
 
-        try:
-            filepath.parent.mkdir(parents=True, exist_ok=True)
+        filepath.parent.mkdir(parents=True, exist_ok=True)
 
-            with filepath.open("w", newline="") as f:
-                writer = csv.writer(f)
+        with filepath.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
 
-                if metadata:
-                    writer.writerow(["# Metadata"])
-                    for k, v in metadata.items():
-                        writer.writerow([f"# {k}", v])
-                    writer.writerow([])  # spacer
+            if metadata:
+                writer.writerow(["# Metadata"])
+                for k, v in metadata.items():
+                    writer.writerow([f"# {k}", v])
+                writer.writerow([])  # spacer
 
-                writer.writerow(
-                    [
-                        "timestamp_iso",
-                        "time_s",
-                        "cmd_raw",
-                        "cmd_limited",
-                        "feedback",
-                        "error",
-                        "errorI",
-                        "output",
-                        "at_speed",
-                    ]
-                )
+            writer.writerow(
+                [
+                    "timestamp_iso",
+                    "time_s",
+                    "cmd_raw",
+                    "cmd_limited",
+                    "feedback",
+                    "error",
+                    "errorI",
+                    "output",
+                    "at_speed",
+                ]
+            )
 
-                for point in data_copy:
-                    writer.writerow(point.to_csv_row())
+            for point in data_copy:
+                writer.writerow(point.to_csv_row())
 
-            return True
-        except Exception:
-            log.exception("CSV export failed for %s", filepath)
-            return False
+        return True
 
     # ---------------------------------------------------------------------
     # Metrics helpers
@@ -263,7 +264,10 @@ class DataLogger:
             rise_time_s / settling_time_s = -1.0 if not determinable.
         """
         if not test_data or len(test_data) < 10:
-            return PerformanceMetrics()
+            metrics = PerformanceMetrics()
+            metrics.rise_time_s = -1.0
+            metrics.settling_time_s = -1.0
+            return metrics
 
         metrics = PerformanceMetrics()
         step_size = end_rpm - start_rpm
@@ -396,18 +400,35 @@ class DataLogger:
 
         metrics = PerformanceMetrics()
 
+        def _get_value(point: Any, key: Any, default: float = 0.0) -> float:
+            if isinstance(point, dict):
+                return self._safe_float(point.get(key, default), default)
+
+            if isinstance(point, (list, tuple)):
+                try:
+                    return self._safe_float(point[key], default)
+                except (IndexError, TypeError):
+                    return default
+
+            return self._safe_float(getattr(point, key, default), default)
+
         # Find point with largest deviation from target RPM
-        max_dev_idx, (max_dev_time, max_dev_rpm) = max(
-            enumerate(test_data), key=lambda x: abs(float(x[1][1]) - target_rpm)
+        max_dev_idx, max_dev_point = max(
+            enumerate(test_data), key=lambda x: abs(_get_value(x[1], 1, target_rpm) - target_rpm)
         )
-        droop = abs(target_rpm - float(max_dev_rpm))
+        max_dev_time = _get_value(max_dev_point, 0, 0.0)
+        max_dev_rpm = _get_value(max_dev_point, 1, target_rpm)
+        droop = abs(target_rpm - max_dev_rpm)
         if droop <= 5.0:
             return metrics
 
         recovery_band = 20.0
-        for t, rpm in test_data[max_dev_idx:]:
-            if abs(float(rpm) - target_rpm) <= recovery_band:
-                metrics.load_recovery_time_s = float(t) - float(max_dev_time)
+        for point in test_data[max_dev_idx:]:
+            t = _get_value(point, 0, max_dev_time)
+            rpm = _get_value(point, 1, target_rpm)
+
+            if abs(rpm - target_rpm) <= recovery_band:
+                metrics.load_recovery_time_s = t - max_dev_time
                 break
         else:
             metrics.load_recovery_time_s = -1.0
