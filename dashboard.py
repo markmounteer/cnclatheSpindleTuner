@@ -159,14 +159,6 @@ class DashboardTab:
         self.live_apply = tk.BooleanVar(value=True)
         self.params_locked = tk.BooleanVar(value=False)
 
-    @staticmethod
-    def _coerce_float(value: Any, default: float = 0.0) -> float:
-        """Safely convert a value to float for numeric widgets."""
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return default
-        
         # Plot state
         self.show_traces: Dict[str, tk.BooleanVar] = {}
         self.figure = None
@@ -177,35 +169,43 @@ class DashboardTab:
         self.plot_paused = False
         self.time_scale = tk.IntVar(value=int(HISTORY_DURATION_S))
         self.dual_axis = tk.BooleanVar(value=False)
-        
+
         # Blitting optimization state (for Raspberry Pi performance)
         self.background = None  # Cached plot background for blitting
         self.plot_dirty = False  # Flag to request full redraw
-        
+
         # Text fallback for no-matplotlib systems
         self.text_fallback = None
-        
+
         # Visual bars for glanceability
         self.bar_cmd = None
         self.bar_fb = None
         self.bar_error_canvas = None
         self.bar_error_rect = None
-        
+
         # Statistics tracking
         self.error_history: deque = deque(maxlen=int(STATS_WINDOW_S * 10))
         self.stats_labels: Dict[str, ttk.Label] = {}
         self.session_peak_error = 0.0  # Persistent peak error (reset only manually)
-        
+
         # Last known values for direction detection
         self.last_feedback = 0.0
         self.last_cmd = 0.0
-        
+
         # Status message for user feedback
         self.status_message = None
-        
+
         # Build UI
         self._setup_ui()
         self._setup_keyboard_shortcuts()
+
+    @staticmethod
+    def _coerce_float(value: Any, default: float = 0.0) -> float:
+        """Safely convert a value to float for numeric widgets."""
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
     
     # =========================================================================
     # UI SETUP
