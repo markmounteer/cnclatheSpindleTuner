@@ -79,7 +79,8 @@ class DataLogger:
         self._lock = threading.RLock()
 
         # Guard against misconfig: always keep >= 1 sample of history.
-        self.buffer_size = max(1, int(buffer_duration_s * 1000 / UPDATE_INTERVAL_MS))
+        interval_ms = UPDATE_INTERVAL_MS if UPDATE_INTERVAL_MS > 0 else 1
+        self.buffer_size = max(1, int(buffer_duration_s * 1000 / interval_ms))
 
         # Circular buffers for plotting (time-limited)
         self.time_buffer: Deque[float] = deque(maxlen=self.buffer_size)
@@ -160,14 +161,16 @@ class DataLogger:
             self.errorI_buffer.clear()
 
     def clear_recording(self) -> None:
-        """Clear recorded data (export history)."""
+        """Clear recorded data (export history) and reset timing."""
         with self._lock:
             self.recorded_data.clear()
             self.session_start = time.time()
+            self._start_time_mono = None
 
     def set_recording(self, enabled: bool) -> None:
         """Enable or disable data recording."""
-        self.recording = bool(enabled)
+        with self._lock:
+            self.recording = bool(enabled)
 
     def get_point_count(self) -> int:
         """Get number of recorded points."""
@@ -385,17 +388,17 @@ class DataLogger:
         metrics = PerformanceMetrics()
 
         # Find point with largest deviation from target RPM
-        min_idx, (min_time, min_rpm) = max(
+        max_dev_idx, (max_dev_time, max_dev_rpm) = max(
             enumerate(test_data), key=lambda x: abs(float(x[1][1]) - target_rpm)
         )
-        droop = abs(target_rpm - float(min_rpm))
+        droop = abs(target_rpm - float(max_dev_rpm))
         if droop <= 5.0:
             return metrics
 
         recovery_band = 20.0
-        for t, rpm in test_data[min_idx:]:
+        for t, rpm in test_data[max_dev_idx:]:
             if abs(float(rpm) - target_rpm) <= recovery_band:
-                metrics.load_recovery_time_s = float(t) - float(min_time)
+                metrics.load_recovery_time_s = float(t) - float(max_dev_time)
                 break
         else:
             metrics.load_recovery_time_s = -1.0
