@@ -241,158 +241,170 @@ class DashboardTab:
     
     def _setup_ui(self):
         """Build the dashboard UI."""
-        # Main container with two rows
-        top_frame = ttk.Frame(self.parent)
-        top_frame.pack(fill=tk.X, padx=5, pady=5)
-        
-        bottom_frame = ttk.Frame(self.parent)
-        bottom_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
-        # === TOP ROW: Gauges + Status + Statistics + Quick Controls ===
-        self._setup_gauges(top_frame)
-        self._setup_status(top_frame)
-        self._setup_statistics(top_frame)
-        self._setup_quick_controls(top_frame)
-        
-        # === BOTTOM ROW: Plot + Parameters ===
-        self._setup_plot(bottom_frame)
-        self._setup_parameters(bottom_frame)
-        
+        # Main split: left (plot + stats) / right (telemetry + params)
+        main_paned = ttk.PanedWindow(self.parent, orient=tk.HORIZONTAL)
+        main_paned.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        left = ttk.Frame(main_paned)
+        right = ttk.Frame(main_paned)
+
+        main_paned.add(left, weight=3)
+        main_paned.add(right, weight=2)
+
+        # LEFT: plot on top, stats below
+        plot_frame = ttk.Frame(left)
+        plot_frame.pack(fill=tk.BOTH, expand=True)
+        stats_frame = ttk.Frame(left)
+        stats_frame.pack(fill=tk.X, pady=(5, 0))
+
+        self._setup_plot(plot_frame)
+        self._setup_statistics(stats_frame)
+
+        # RIGHT: gauges + status + quick controls stacked, parameters fill rest
+        right_top = ttk.Frame(right)
+        right_top.pack(fill=tk.X)
+        self._setup_gauges(right_top)
+        self._setup_status(right_top)
+        self._setup_quick_controls(right_top)
+
+        self._setup_parameters(right)
+
         # Status message bar at bottom
-        self.status_message = ttk.Label(self.parent, text="", foreground="blue", 
+        self.status_message = ttk.Label(self.parent, text="", foreground="blue",
                                          font=("Arial", 9))
         self.status_message.pack(side=tk.BOTTOM, fill=tk.X, padx=5, pady=2)
     
     def _setup_gauges(self, parent: ttk.Frame):
         """Setup RPM gauge displays with visual bars and error meter."""
-        gauge_frame = ttk.LabelFrame(parent, text="Spindle Telemetry", padding="5")
-        gauge_frame.pack(side=tk.LEFT, fill=tk.Y, padx=5)
-        
-        # Direction indicator
-        dir_frame = ttk.Frame(gauge_frame)
-        dir_frame.pack(fill=tk.X, pady=(0, 2))
-        ttk.Label(dir_frame, text="Direction:", font=("Arial", 9)).pack(side=tk.LEFT)
-        self.lbl_direction = ttk.Label(dir_frame, text="STOP", 
-                                        font=("Arial", 10, "bold"), foreground="gray")
-        self.lbl_direction.pack(side=tk.LEFT, padx=5)
-        
-        ttk.Separator(gauge_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=3)
-        
+        frame = ttk.LabelFrame(parent, text="Spindle", padding=5)
+        frame.pack(side=tk.TOP, fill=tk.X, pady=(0, 5))
+
+        top = ttk.Frame(frame)
+        top.pack(fill=tk.X)
+        ttk.Label(top, text="Direction:").pack(side=tk.LEFT)
+        self.lbl_direction = ttk.Label(
+            top, text="STOP", font=("Arial", 11, "bold"), foreground="gray"
+        )
+        self.lbl_direction.pack(side=tk.LEFT, padx=4)
+
+        self.lbl_spindle_state = ttk.Label(
+            top, text="DISABLED", font=("Arial", 9, "bold"), foreground="red"
+        )
+        self.lbl_spindle_state.pack(side=tk.RIGHT)
+
         # Command RPM
-        cmd_frame = ttk.Frame(gauge_frame)
-        cmd_frame.pack(fill=tk.X)
-        ttk.Label(cmd_frame, text="Cmd:", font=("Arial", 9), width=6).pack(side=tk.LEFT)
-        self.lbl_cmd = ttk.Label(cmd_frame, text="0", 
-                                  font=("Courier", 16, "bold"), foreground="blue", width=5)
+        cmd_frame = ttk.Frame(frame)
+        cmd_frame.pack(fill=tk.X, pady=(2, 0))
+        ttk.Label(cmd_frame, text="Cmd:", width=8).pack(side=tk.LEFT)
+        self.lbl_cmd = ttk.Label(cmd_frame, text="0",
+                                  font=("Courier", 16, "bold"), foreground="blue", width=6)
         self.lbl_cmd.pack(side=tk.LEFT)
-        
+
         # Feedback RPM
-        fb_frame = ttk.Frame(gauge_frame)
+        fb_frame = ttk.Frame(frame)
         fb_frame.pack(fill=tk.X)
-        ttk.Label(fb_frame, text="Act:", font=("Arial", 9), width=6).pack(side=tk.LEFT)
+        ttk.Label(fb_frame, text="Act:", width=8).pack(side=tk.LEFT)
         self.lbl_feedback = ttk.Label(fb_frame, text="0",
-                                       font=("Courier", 16, "bold"), foreground="green", width=5)
+                                       font=("Courier", 16, "bold"), foreground="green", width=6)
         self.lbl_feedback.pack(side=tk.LEFT)
-        
+
         # Visual RPM progress bars for slip monitoring
-        bars_frame = ttk.Frame(gauge_frame)
+        bars_frame = ttk.Frame(frame)
         bars_frame.pack(fill=tk.X, pady=(2, 5))
-        self.bar_cmd = ttk.Progressbar(bars_frame, orient=tk.HORIZONTAL, length=140, 
+        self.bar_cmd = ttk.Progressbar(bars_frame, orient=tk.HORIZONTAL, length=140,
                                         mode='determinate', maximum=2000)
         self.bar_cmd.pack(fill=tk.X, pady=1)
-        self.bar_fb = ttk.Progressbar(bars_frame, orient=tk.HORIZONTAL, length=140, 
+        self.bar_fb = ttk.Progressbar(bars_frame, orient=tk.HORIZONTAL, length=140,
                                        mode='determinate', maximum=2000)
         self.bar_fb.pack(fill=tk.X, pady=1)
-        
-        ttk.Separator(gauge_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=3)
-        
+
         # Error with color coding
-        err_frame = ttk.Frame(gauge_frame)
+        err_frame = ttk.Frame(frame)
         err_frame.pack(fill=tk.X)
-        ttk.Label(err_frame, text="Error:", font=("Arial", 9), width=6).pack(side=tk.LEFT)
+        ttk.Label(err_frame, text="Error:", width=8).pack(side=tk.LEFT)
         self.lbl_error = ttk.Label(err_frame, text="0.0",
-                                    font=("Courier", 14), foreground="green", width=6)
+                                    font=("Courier", 14), foreground="green", width=7)
         self.lbl_error.pack(side=tk.LEFT)
-        
+
         # Bidirectional Error Meter (Canvas-based)
         # Shows positive/negative error growing from center
-        self.bar_error_canvas = tk.Canvas(gauge_frame, width=140, height=12, 
+        self.bar_error_canvas = tk.Canvas(frame, width=160, height=12,
                                            bg="#e0e0e0", bd=0, highlightthickness=0)
         self.bar_error_canvas.pack(fill=tk.X, pady=(0, 5))
         # Center line marker
-        self.bar_error_canvas.create_line(70, 0, 70, 12, fill="gray")
+        self.bar_error_canvas.create_line(80, 0, 80, 12, fill="gray")
         # Dynamic error bar (starts at center)
-        self.bar_error_rect = self.bar_error_canvas.create_rectangle(70, 2, 70, 10, fill="green")
-        
+        self.bar_error_rect = self.bar_error_canvas.create_rectangle(80, 2, 80, 10, fill="green")
+
         # Integrator
-        int_frame = ttk.Frame(gauge_frame)
+        int_frame = ttk.Frame(frame)
         int_frame.pack(fill=tk.X)
-        ttk.Label(int_frame, text="∫ Err:", font=("Arial", 9), width=6).pack(side=tk.LEFT)
+        ttk.Label(int_frame, text="∫ Err:", width=8).pack(side=tk.LEFT)
         self.lbl_errorI = ttk.Label(int_frame, text="0.0",
-                                     font=("Courier", 12), foreground="orange", width=7)
+                                     font=("Courier", 12), foreground="orange", width=8)
         self.lbl_errorI.pack(side=tk.LEFT)
-        
-        ttk.Separator(gauge_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=3)
-        
+
         # PID Output
-        out_frame = ttk.Frame(gauge_frame)
+        out_frame = ttk.Frame(frame)
         out_frame.pack(fill=tk.X)
-        ttk.Label(out_frame, text="PID Out:", font=("Arial", 9), width=6).pack(side=tk.LEFT)
+        ttk.Label(out_frame, text="PID Out:", width=8).pack(side=tk.LEFT)
         self.lbl_output = ttk.Label(out_frame, text="0.0",
-                                     font=("Courier", 12), foreground="purple", width=7)
+                                     font=("Courier", 12), foreground="purple", width=8)
         self.lbl_output.pack(side=tk.LEFT)
-        
+
         # VFD % (calculated) and estimated Hz
-        vfd_frame = ttk.Frame(gauge_frame)
+        vfd_frame = ttk.Frame(frame)
         vfd_frame.pack(fill=tk.X)
-        ttk.Label(vfd_frame, text="VFD %:", font=("Arial", 9), width=6).pack(side=tk.LEFT)
+        ttk.Label(vfd_frame, text="VFD %:", width=8).pack(side=tk.LEFT)
         self.lbl_vfd_pct = ttk.Label(vfd_frame, text="0%",
-                                      font=("Courier", 12), foreground="brown", width=4)
+                                      font=("Courier", 12), foreground="brown", width=5)
         self.lbl_vfd_pct.pack(side=tk.LEFT)
         # Estimated Hz for VFD verification
         self.lbl_hz = ttk.Label(vfd_frame, text="(0Hz)",
                                  font=("Arial", 9), foreground="gray")
         self.lbl_hz.pack(side=tk.LEFT, padx=(2, 0))
-        
-        ttk.Separator(gauge_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=3)
-        
+
         # Revs counter (for threading, §10.2)
-        revs_frame = ttk.Frame(gauge_frame)
-        revs_frame.pack(fill=tk.X)
-        ttk.Label(revs_frame, text="Revs:", font=("Arial", 9), width=6).pack(side=tk.LEFT)
+        revs_frame = ttk.Frame(frame)
+        revs_frame.pack(fill=tk.X, pady=(2, 0))
+        ttk.Label(revs_frame, text="Revs:", width=8).pack(side=tk.LEFT)
         self.lbl_revs = ttk.Label(revs_frame, text="0.00",
-                                   font=("Courier", 12), foreground="teal", width=7)
+                                   font=("Courier", 12), foreground="teal", width=8)
         self.lbl_revs.pack(side=tk.LEFT)
     
     def _setup_status(self, parent: ttk.Frame):
         """Setup status indicator LEDs."""
-        status_frame = ttk.LabelFrame(parent, text="Status", padding="5")
-        status_frame.pack(side=tk.LEFT, fill=tk.Y, padx=5)
-        
+        frame = ttk.Frame(parent)
+        frame.pack(fill=tk.X, pady=(0, 5))
+
         self.status_indicators = {}
         indicators = [
-            ('at_speed', 'AT-SPEED', 'At target speed'),
-            ('watchdog', 'WATCHDOG', 'Encoder watchdog armed'),
-            ('spindle_on', 'ENABLED', 'Spindle output enabled'),
-            ('encoder_ok', 'ENCODER', 'Encoder signal OK'),
-            ('safety_chain', 'EXTERNAL', 'External OK signal'),
+            ('at_speed', 'AT SPEED'),
+            ('watchdog', 'WATCHDOG'),
+            ('spindle_on', 'ENABLED'),
+            ('encoder_ok', 'ENCODER'),
+            ('safety_chain', 'EXTERNAL'),
         ]
-        
-        for key, text, tooltip in indicators:
-            frame = ttk.Frame(status_frame)
-            frame.pack(anchor=tk.W, pady=1)
 
-            lbl = ttk.Label(frame, text=f"● {text}",
-                           foreground="gray", font=("Arial", 9))
-            lbl.pack(side=tk.LEFT)
+        for key, text in indicators:
+            lbl = ttk.Label(frame, text=text, padding=(4, 0))
+            lbl.pack(side=tk.LEFT, padx=2)
             self.status_indicators[key] = lbl
 
-            Tooltip(lbl, tooltip)
+    def _set_status_led(self, key: str, ok: bool, warn: bool = False):
+        lbl = self.status_indicators.get(key)
+        if not lbl:
+            return
+        if ok:
+            color = "green" if not warn else "orange"
+        else:
+            color = "red"
+        lbl.config(foreground=color)
     
     def _setup_statistics(self, parent: ttk.Frame):
         """Setup statistics panel showing min/max/avg."""
         stats_frame = ttk.LabelFrame(parent, text=f"Statistics ({STATS_WINDOW_S:.0f}s)", padding="5")
-        stats_frame.pack(side=tk.LEFT, fill=tk.Y, padx=5)
+        stats_frame.pack(fill=tk.X, padx=5)
         
         stats = [
             ('error_avg', 'Avg Error:', 'blue'),
@@ -419,63 +431,66 @@ class DashboardTab:
     
     def _setup_quick_controls(self, parent: ttk.Frame):
         """Setup quick speed controls and presets."""
-        ctrl_frame = ttk.LabelFrame(parent, text="Quick Controls", padding="5")
-        ctrl_frame.pack(side=tk.LEFT, fill=tk.Y, padx=5)
-        
-        # Speed entry
-        speed_frame = ttk.Frame(ctrl_frame)
-        speed_frame.pack(fill=tk.X, pady=2)
-        
-        ttk.Label(speed_frame, text="RPM:", font=("Arial", 9)).pack(side=tk.LEFT)
-        self.speed_entry = ttk.Entry(speed_frame, width=6)
+        frame = ttk.LabelFrame(parent, text="Controls", padding=5)
+        frame.pack(fill=tk.X, pady=(0, 5))
+
+        top = ttk.Frame(frame)
+        top.pack(fill=tk.X, pady=2)
+        ttk.Label(top, text="RPM:").pack(side=tk.LEFT)
+        self.speed_entry = ttk.Entry(top, width=6)
         self.speed_entry.insert(0, "1000")
-        self.speed_entry.pack(side=tk.LEFT, padx=2)
-        # Bind Return key for better UX
+        self.speed_entry.pack(side=tk.LEFT, padx=(2, 4))
         self.speed_entry.bind('<Return>', lambda e: self._go_to_speed())
-        ttk.Button(speed_frame, text="Go", width=3,
-                  command=self._go_to_speed).pack(side=tk.LEFT)
-        
-        # Speed preset buttons
-        speeds_frame = ttk.Frame(ctrl_frame)
-        speeds_frame.pack(fill=tk.X, pady=2)
-        
+        ttk.Button(top, text="Go", width=4, command=self._go_to_speed).pack(side=tk.LEFT)
+
+        self.btn_stop = tk.Button(
+            frame, text="■ STOP (M5)", command=self._stop_spindle,
+            bg="#cc0000", fg="white", font=("Arial", 10, "bold")
+        )
+        self.btn_stop.pack(fill=tk.X, pady=(4, 4))
+
+        presets = ttk.Frame(frame)
+        presets.pack(fill=tk.X, pady=2)
         for speed in [500, 1000, 1500, 1800]:
-            btn = ttk.Button(speeds_frame, text=f"{speed}", width=5,
-                            command=lambda s=speed: self._start_spindle(s))
-            btn.pack(side=tk.LEFT, padx=1)
-        
-        # Stop button (prominent)
-        self.btn_stop = tk.Button(ctrl_frame, text="■ STOP (M5)", 
-                                   command=self._stop_spindle,
-                                   bg="red", fg="white", font=("Arial", 10, "bold"))
-        self.btn_stop.pack(fill=tk.X, pady=5)
-        
-        ttk.Separator(ctrl_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=3)
-        
-        # Direction buttons
-        dir_frame = ttk.Frame(ctrl_frame)
-        dir_frame.pack(fill=tk.X, pady=2)
-        ttk.Button(dir_frame, text="CW (M3)", width=8,
-                  command=lambda: self._start_spindle(direction='cw')).pack(side=tk.LEFT, padx=2)
-        ttk.Button(dir_frame, text="CCW (M4)", width=8,
-                  command=lambda: self._start_spindle(direction='ccw')).pack(side=tk.LEFT, padx=2)
-        
-        ttk.Separator(ctrl_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=3)
-        
-        # Preset buttons
-        ttk.Label(ctrl_frame, text="Tuning Presets:", font=("Arial", 9)).pack(anchor=tk.W)
-        for preset_name in ['conservative', 'baseline', 'aggressive']:
-            ttk.Button(ctrl_frame, text=preset_name.title(), width=14,
-                      command=lambda p=preset_name: self.apply_preset(p)).pack(pady=1)
+            ttk.Button(presets, text=str(speed), width=5,
+                       command=lambda s=speed: self._start_spindle(s)).pack(
+                side=tk.LEFT, padx=1)
+
+        dir_row = ttk.Frame(frame)
+        dir_row.pack(fill=tk.X, pady=(4, 2))
+        ttk.Button(dir_row, text="CW (M3)", width=8,
+                   command=lambda: self._start_spindle(direction='cw')).pack(side=tk.LEFT, padx=2)
+        ttk.Button(dir_row, text="CCW (M4)", width=8,
+                   command=lambda: self._start_spindle(direction='ccw')).pack(side=tk.LEFT, padx=2)
+
+        preset_row = ttk.Frame(frame)
+        preset_row.pack(fill=tk.X, pady=(4, 0))
+        for name in ["conservative", "baseline", "aggressive"]:
+            ttk.Button(preset_row, text=name.title(), width=10,
+                       command=lambda p=name: self.apply_preset(p)).pack(side=tk.LEFT, padx=1)
     
     def _setup_plot(self, parent: ttk.Frame):
         """Setup real-time plot with matplotlib and enhanced controls."""
         plot_frame = ttk.LabelFrame(parent, text="Real-Time Plot", padding="5")
-        plot_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
+        plot_frame.pack(fill=tk.BOTH, expand=True)
 
         if not HAS_MATPLOTLIB:
-            # Canvas-based fallback for systems without matplotlib
-            self._setup_canvas_fallback(plot_frame)
+            ttk.Label(
+                plot_frame,
+                text="Matplotlib not available – text telemetry mode",
+                font=("Arial", 10, "bold")
+            ).pack(pady=(0, 5))
+
+            self.text_fallback = tk.Text(
+                plot_frame,
+                font=("Courier New", 11),
+                state=tk.DISABLED,
+                bg="#111111",
+                fg="#EEEEEE",
+                relief="flat",
+                borderwidth=8
+            )
+            self.text_fallback.pack(fill=tk.BOTH, expand=True)
             return
         
         # Plot controls bar
@@ -503,6 +518,11 @@ class DashboardTab:
         self.plot_grid = tk.BooleanVar(value=True)
         ttk.Checkbutton(controls, text="Grid", variable=self.plot_grid,
                        command=self._toggle_plot_grid).pack(side=tk.LEFT, padx=5)
+
+        self.plot_mode_label = ttk.Label(
+            controls, text="Plot: Command, Feedback, Error, Integrator", foreground="gray40"
+        )
+        self.plot_mode_label.pack(side=tk.LEFT, padx=10)
 
         # Initialize trace visibility variables before building axes so defaults apply
         for name, config in PLOT_TRACES.items():
@@ -730,9 +750,6 @@ class DashboardTab:
         # Telemetry summary below the chart
         self._setup_fallback_telemetry(main_frame)
 
-        # Store text_fallback as flag for update loop detection
-        self.text_fallback = True
-
     def _on_fallback_chart_resize(self, event):
         """Handle chart canvas resize."""
         self.chart_width = event.width
@@ -882,6 +899,33 @@ class DashboardTab:
             self.fallback_labels['output'].config(text=f"{output:.1f}")
             self.fallback_labels['revs'].config(text=f"{revs:.2f}")
 
+    def _update_text_fallback(self, values: Dict[str, float]):
+        if self.text_fallback is None or not isinstance(self.text_fallback, tk.Text):
+            return
+
+        cmd = values.get('cmd_limited', 0)
+        fb = values.get('feedback', 0)
+        err = values.get('error', 0)
+        errI = values.get('errorI', 0)
+        out = values.get('output', 0)
+        revs = values.get('spindle_revs', 0)
+
+        self.text_fallback.config(state=tk.NORMAL)
+        self.text_fallback.delete('1.0', tk.END)
+
+        text = (
+            f"Time: {time.strftime('%H:%M:%S')}\n"
+            f"Cmd:       {cmd:8.0f} RPM\n"
+            f"Feedback:  {fb:8.0f} RPM\n"
+            f"Error:     {err:8.1f} RPM\n"
+            f"Integrator:{errI:8.1f}\n"
+            f"PID Out:   {out:8.1f}\n"
+            f"Revs:      {revs:8.2f}\n"
+        )
+
+        self.text_fallback.insert(tk.END, text)
+        self.text_fallback.config(state=tk.DISABLED)
+
         # Update RPM bar visualization
         if hasattr(self, 'fallback_bar_canvas'):
             self._update_fallback_bars(cmd, feedback)
@@ -989,14 +1033,14 @@ class DashboardTab:
     def _setup_parameters(self, parent: ttk.Frame):
         """Setup parameter tuning controls with groups."""
         param_frame = ttk.LabelFrame(parent, text="Parameters", padding="5")
-        param_frame.pack(side=tk.LEFT, fill=tk.Y, padx=5)
+        param_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=(0, 5))
         
         # Control buttons at top
         btn_frame = ttk.Frame(param_frame)
         btn_frame.pack(fill=tk.X, pady=(0, 5))
         
         # Lock button to prevent accidental changes during tests
-        self.lock_btn = ttk.Checkbutton(btn_frame, text="🔒", width=3,
+        self.lock_btn = ttk.Checkbutton(btn_frame, text="🔓", width=3,
                                          variable=self.params_locked,
                                          command=self._toggle_params_lock)
         self.lock_btn.pack(side=tk.LEFT, padx=2)
@@ -1061,12 +1105,13 @@ class DashboardTab:
                 
                 # Value label - clickable for precision editing
                 val_lbl = ttk.Label(frame, text=f"{var.get():.2f}", width=6,
-                                    font=("Courier", 9, "underline"), 
+                                    font=("Courier", 9, "underline"),
                                     foreground="blue", cursor="hand2")
                 val_lbl.pack(side=tk.LEFT)
                 val_lbl.bind("<Button-1>", lambda e, p=param_name: self._edit_param_value(p))
                 val_lbl.bind("<Button-3>", lambda e, p=param_name: self._show_param_context_menu(e, p))
                 self.param_labels[param_name] = val_lbl
+                self._update_param_label_style(param_name)
         
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
@@ -1079,6 +1124,21 @@ class DashboardTab:
         # Update button state when live_apply changes
         self.live_apply.trace_add("write", self._update_apply_button_state)
         self._update_apply_button_state()  # Set initial state
+
+    def _update_param_label_style(self, param_name: str):
+        baseline = BASELINE_PARAMS.get(param_name)
+        if baseline is None:
+            return
+        current = self.param_vars.get(param_name)
+        lbl = self.param_labels.get(param_name)
+        if not current or not lbl:
+            return
+
+        value = current.get()
+        if abs(value - baseline) < 1e-6:
+            lbl.config(foreground="gray25", font=("Courier", 9, "underline"))
+        else:
+            lbl.config(foreground="blue", font=("Courier", 9, "bold", "underline"))
     
     def _setup_keyboard_shortcuts(self):
         """Setup keyboard shortcuts."""
@@ -1127,10 +1187,11 @@ class DashboardTab:
         if new_val is not None:
             # Snap to step (matches HAL behavior)
             new_val = self._snap_param(param_name, new_val)
-            
+
             # Update UI and HAL
             self.param_vars[param_name].set(new_val)
             self._on_slider_change(param_name, str(new_val))
+            self._update_param_label_style(param_name)
     
     def _show_param_context_menu(self, event, param_name: str):
         """Show context menu for parameter with reset option."""
@@ -1170,19 +1231,18 @@ class DashboardTab:
     def _toggle_params_lock(self):
         """Toggle parameter lock state to prevent accidental changes."""
         locked = self.params_locked.get()
-        state = "disabled" if locked else "!disabled"
-        
+        new_state = tk.DISABLED if locked else tk.NORMAL
+
         for scale in self.param_scales.values():
-            scale.state([state])
-        
-        # Update lock button appearance
+            scale.configure(state=new_state)
+
+        for lbl in self.param_labels.values():
+            lbl.configure(state=new_state)
+
         if hasattr(self, 'lock_btn'):
             self.lock_btn.config(text="🔒" if locked else "🔓")
-        
-        if locked:
-            self._show_status_message("Parameters locked")
-        else:
-            self._show_status_message("Parameters unlocked")
+
+        self._show_status_message("Parameters locked" if locked else "Parameters unlocked")
     
     def _apply_all_with_feedback(self):
         """Apply all parameters and show feedback."""
@@ -1386,6 +1446,7 @@ class DashboardTab:
             self.param_vars[param_name].set(val)
             if param_name in self.param_labels:
                 self.param_labels[param_name].config(text=f"{val:.2f}")
+                self._update_param_label_style(param_name)
             
             # Live apply if enabled (dashboard has direct HAL access)
             if self.live_apply.get():
@@ -1404,6 +1465,7 @@ class DashboardTab:
             self.param_vars[param_name].set(value)
             if param_name in self.param_labels:
                 self.param_labels[param_name].config(text=f"{value:.2f}")
+                self._update_param_label_style(param_name)
         self._show_status_message("Parameters loaded from HAL")
     
     def reset_to_baseline(self):
@@ -1413,6 +1475,7 @@ class DashboardTab:
                 self.param_vars[param_name].set(value)
                 if param_name in self.param_labels:
                     self.param_labels[param_name].config(text=f"{value:.2f}")
+                    self._update_param_label_style(param_name)
                 if self.live_apply.get():
                     self.hal.set_param(param_name, value)
         self._show_status_message("Reset all parameters to baseline")
@@ -1428,6 +1491,7 @@ class DashboardTab:
                 self.param_vars[param].set(value)
                 if param in self.param_labels:
                     self.param_labels[param].config(text=f"{value:.2f}")
+                    self._update_param_label_style(param)
                 if self.live_apply.get():
                     self.hal.set_param(param, value)
                 elif self.on_param_change:
@@ -1450,6 +1514,7 @@ class DashboardTab:
                 self.param_vars[param].set(value)
                 if param in self.param_labels:
                     self.param_labels[param].config(text=f"{value:.2f}")
+                    self._update_param_label_style(param)
     
     # =========================================================================
     # STATISTICS
@@ -1537,12 +1602,13 @@ class DashboardTab:
         
         # Update Bidirectional Error Meter
         if self.bar_error_canvas and self.bar_error_rect:
-            width = 140
+            width = 160
             center = width / 2
-            scale = 2.0  # Pixels per RPM error
-            
+            scale = 1.0  # Pixels per RPM error
+            max_rpm_visual = 100.0
+
             # Clamp visualization to canvas size
-            bar_len = min(center, max(-center, err * scale))
+            bar_len = max(-max_rpm_visual, min(max_rpm_visual, err)) * scale
             
             # Determine color based on error magnitude
             abs_err = abs(err)
@@ -1604,17 +1670,18 @@ class DashboardTab:
         spindle_on = values.get('spindle_on', 0) > 0.5
         encoder_ok = values.get('encoder_fault', 0) < 0.5
         external_ok = values.get('safety_chain', 1.0) > 0.5
-        
-        self.status_indicators['at_speed'].config(
-            foreground="green" if at_speed else "gray")
-        self.status_indicators['watchdog'].config(
-            foreground="yellow" if watchdog else "gray")
-        self.status_indicators['spindle_on'].config(
-            foreground="green" if spindle_on else "gray")
-        self.status_indicators['encoder_ok'].config(
-            foreground="green" if encoder_ok else "red")
-        self.status_indicators['safety_chain'].config(
-            foreground="green" if external_ok else "red")
+
+        self._set_status_led('at_speed', at_speed)
+        self._set_status_led('watchdog', watchdog, warn=True)
+        self._set_status_led('spindle_on', spindle_on)
+        self._set_status_led('encoder_ok', encoder_ok)
+        self._set_status_led('safety_chain', external_ok)
+
+        if hasattr(self, 'lbl_spindle_state'):
+            self.lbl_spindle_state.config(
+                text="ENABLED" if spindle_on else "DISABLED",
+                foreground="green" if spindle_on else "red"
+            )
         
         # Update statistics
         self._update_statistics(err)
@@ -1631,7 +1698,9 @@ class DashboardTab:
         if not self.plot_paused:
             if HAS_MATPLOTLIB:
                 self._update_plot()
-            elif self.text_fallback:
+            elif isinstance(self.text_fallback, tk.Text):
+                self._update_text_fallback(values)
+            else:
                 self._update_canvas_fallback(values)
     
     def _update_plot(self):
