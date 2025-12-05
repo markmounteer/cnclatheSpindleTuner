@@ -1,49 +1,44 @@
-# [Potential Errors Register]
-**Last Updated:** 2025-12-05 17:48 UTC
+# Potential Errors Register
+**Directory:** /workspace/cnclatheSpindleTuner/
+**Last Updated:** 2025-12-05 18:13 UTC
 **Total Entries:** 4 | **New:** 4 | **Under Review:** 0 | **Resolved:** 0
 
 ## Summary Index
 | ID | Status | Priority | Source File | Title | Submitted |
 |----|--------|----------|-------------|-------|-----------|
-| ERR-20251205-001 | 🆕 New | 🟡 Medium | `/dashboard.py` | Section Reference "§10.2" - Unknown Document Source | 2025-12-05 |
-| ERR-20251205-002 | 🆕 New | 🟢 Low | `/dashboard.py` | Hardcoded Plot Trace Label May Not Match Defaults | 2025-12-05 |
-| ERR-20251205-004 | 🆕 New | 🟡 Medium | `/hal_interface.py` | Auto-Reconnect Claim May Be Inaccurate | 2025-12-05 |
-| ERR-20251205-003 | 🆕 New | 🟢 Low | `/hal_interface.py` | Tuning Guide Version Reference May Be Outdated | 2025-12-05 |
+| ERR-20251205-001 | 🆕 New | 🟡 Medium | dashboard.py | Section Reference "§10.2" - Unknown Document Source | 2025-12-05 |
+| ERR-20251205-002 | 🆕 New | 🟢 Low | dashboard.py | Hardcoded Plot Trace Label May Not Match Defaults | 2025-12-05 |
+| ERR-20251205-003 | 🆕 New | 🟢 Low | hal_interface.py | Tuning Guide Version Reference May Be Outdated | 2025-12-05 |
+| ERR-20251205-004 | 🆕 New | 🟡 Medium | hal_interface.py | Auto-Reconnect Claim May Be Inaccurate | 2025-12-05 |
 
 ---
 
 ## Entries
-
-### dashboard.py
-
----
 
 ### ERR-20251205-001 Section Reference "§10.2" - Unknown Document Source
 
 | Field | Value |
 |-------|-------|
 | Status | 🆕 New |
-| Source File | `/dashboard.py` |
+| Source File | dashboard.py |
 | Location | Lines 20, 367 |
 | Submitted By | Code Review Agent |
 | Submitted | 2025-12-05 |
 | Priority | 🟡 Medium |
-| Duplicate Of | — |
+| Duplicate Of | N/A |
 
-**Description:**
-The section reference §10.2 appears twice in comments related to revs gauge for threading without specifying which document it references.
+**Description:** The section reference §10.2 appears twice in comments related to the revs gauge for threading without citing the referenced document.
 
-**Context:**
-`(§10.2)` appears in comments at lines 20 and 367 related to revs gauge for threading.
+**Context:** `(§10.2)` appears in comments at lines 20 and 367 related to the threading revs gauge.
 
-**Rationale:**
-May be a valid reference to external LinuxCNC documentation, hardware manual, or project-specific documentation, but without clarification readers cannot verify or follow up on the reference.
+**Rationale:** Without identifying the source document, readers cannot verify or follow up on the reference.
 
-**Verification Required:**
-Confirm whether §10.2 refers to a known document section; if not, remove or clarify the reference.
+**Uncertainty:** The reference may correspond to a known manual section, but this is not stated explicitly.
+
+**Verification Required:** Confirm whether §10.2 maps to a published document; if not, clarify or remove the reference.
 
 **Review History:**
-- 2025-12-05 | System | Entry migrated to standardized register format
+- 2025-12-05 | System | Entry migrated to standardized register format.
 
 ---
 
@@ -52,65 +47,25 @@ Confirm whether §10.2 refers to a known document section; if not, remove or cla
 | Field | Value |
 |-------|-------|
 | Status | 🆕 New |
-| Source File | `/dashboard.py` |
+| Source File | dashboard.py |
 | Location | Line 523 |
 | Submitted By | Code Review Agent |
 | Submitted | 2025-12-05 |
 | Priority | 🟢 Low |
-| Duplicate Of | — |
+| Duplicate Of | N/A |
 
-**Description:**
-The label text is hardcoded to show four traces ("Command, Feedback, Error, Integrator"), but actual visible traces depend on `PLOT_DEFAULTS` from config.py.
+**Description:** The label text is hardcoded to show four traces ("Command, Feedback, Error, Integrator"), but actual visible traces depend on `PLOT_DEFAULTS` from `config.py`.
 
-**Context:**
-```python
-self.plot_mode_label = ttk.Label(controls, text="Plot: Command, Feedback, Error, Integrator", ...)
-```
+**Context:** The plot mode label is set statically while `PLOT_DEFAULTS` controls which traces display.
 
-**Rationale:**
-The label may be intentionally informational (showing available traces) rather than reflecting current state, but this creates potential confusion if `PLOT_DEFAULTS` differs from the displayed text.
+**Rationale:** Hardcoded text may misrepresent active traces, potentially confusing users.
 
-**Verification Required:**
-Check if PLOT_DEFAULTS matches this list; consider whether label should be dynamic or if current behavior is acceptable.
+**Uncertainty:** If the label is intended to list available traces rather than active ones, the current behavior might be acceptable.
 
-**Related Entries:**
-- See FEAT-20251205-002 for proposed enhancement to make this label dynamic.
+**Verification Required:** Compare `PLOT_DEFAULTS` to the label and decide whether the label should be dynamic.
 
 **Review History:**
-- 2025-12-05 | System | Entry migrated to standardized register format
-
----
-
-### hal_interface.py
-
----
-
-### ERR-20251205-004 Auto-Reconnect Claim May Be Inaccurate
-
-| Field | Value |
-|-------|-------|
-| Status | 🆕 New |
-| Source File | `/hal_interface.py` |
-| Location | Line 13 |
-| Submitted By | Code Review Agent |
-| Submitted | 2025-12-05 |
-| Priority | 🟡 Medium |
-| Duplicate Of | — |
-
-**Description:**
-The introductory docstring lists "Connection state management with auto-reconnect" as an improvement, but the code only falls back to mock mode on connection failure and does not appear to attempt reconnection.
-
-**Context:**
-Module docstring at line 13 claims auto-reconnect capability that may not be implemented.
-
-**Rationale:**
-Documentation claiming functionality that doesn't exist can mislead developers and users. There may be reconnection logic elsewhere in the application or planned but not present in this module.
-
-**Verification Required:**
-Confirm whether any automatic reconnection is implemented elsewhere or intended; if not, update the documentation to reflect the current behavior.
-
-**Review History:**
-- 2025-12-05 | System | Entry migrated to standardized register format
+- 2025-12-05 | System | Entry migrated to standardized register format.
 
 ---
 
@@ -119,32 +74,51 @@ Confirm whether any automatic reconnection is implemented elsewhere or intended;
 | Field | Value |
 |-------|-------|
 | Status | 🆕 New |
-| Source File | `/hal_interface.py` |
+| Source File | hal_interface.py |
 | Location | Line 1628 |
 | Submitted By | Code Review Agent |
 | Submitted | 2025-12-05 |
 | Priority | 🟢 Low |
-| Duplicate Of | — |
+| Duplicate Of | N/A |
 
-**Description:**
-The comment references "Spindle PID Tuning Guide v5.3" in the generated INI section, but the guide version number may have been updated since this code was written. The CHANGELOG references "Spindle Tuner v6.0" but there's no clear indication of what the current tuning guide version should be.
+**Description:** The generated INI section references "Spindle PID Tuning Guide v5.3", which may not match the current documentation version.
 
-**Context:**
-```python
-"# Based on Spindle PID Tuning Guide v5.3",
-```
+**Context:** Comment in the generated INI template references the tuning guide version.
 
-**Rationale:**
-Outdated version references in generated configuration files may cause confusion for users trying to locate the correct documentation version.
+**Rationale:** Outdated version references can mislead users seeking the correct documentation.
 
-**Verification Required:**
-Confirm the current version of the Spindle PID Tuning Guide documentation and update the reference if outdated.
+**Uncertainty:** The guide may still be at v5.3; confirmation is needed.
+
+**Verification Required:** Check the latest tuning guide version and update the reference if necessary.
 
 **Review History:**
-- 2025-12-05 | System | Entry migrated to standardized register format
+- 2025-12-05 | System | Entry migrated to standardized register format.
 
 ---
 
-## Archive
+### ERR-20251205-004 Auto-Reconnect Claim May Be Inaccurate
 
-*No resolved entries yet.*
+| Field | Value |
+|-------|-------|
+| Status | 🆕 New |
+| Source File | hal_interface.py |
+| Location | Line 13 |
+| Submitted By | Code Review Agent |
+| Submitted | 2025-12-05 |
+| Priority | 🟡 Medium |
+| Duplicate Of | N/A |
+
+**Description:** The module docstring lists "Connection state management with auto-reconnect" as an improvement, but the code only falls back to mock mode on connection failure.
+
+**Context:** Introductory docstring claim at the top of the file.
+
+**Rationale:** Claiming unimplemented auto-reconnect behavior can mislead developers and users.
+
+**Uncertainty:** Auto-reconnect could be implemented elsewhere in the application; verification is required.
+
+**Verification Required:** Determine whether automatic reconnection is implemented or intended; adjust documentation accordingly.
+
+**Review History:**
+- 2025-12-05 | System | Entry migrated to standardized register format.
+
+---
