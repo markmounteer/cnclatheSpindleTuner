@@ -167,6 +167,7 @@ class DashboardTab:
         self.canvas = None
         self.lines: Dict[str, "Line2D"] = {}  # String annotation for conditional import
         self.plot_paused = False
+        self.btn_pause = None
         self.time_scale = tk.IntVar(value=int(HISTORY_DURATION_S))
         self.dual_axis = tk.BooleanVar(value=False)
 
@@ -176,6 +177,14 @@ class DashboardTab:
 
         # Text fallback for no-matplotlib systems
         self.text_fallback = None
+
+        # Canvas-based fallback chart (when matplotlib unavailable)
+        self.fallback_chart = None
+        self.fallback_chart_data: deque = deque(maxlen=300)  # 30 seconds at 10Hz
+        self.btn_pause_fallback = None
+        self.fallback_traces: Dict[str, tk.BooleanVar] = {}
+        self.fallback_labels: Dict[str, ttk.Label] = {}
+        self.fallback_bar_canvas = None
 
         # Visual bars for glanceability
         self.bar_cmd = None
@@ -465,12 +474,8 @@ class DashboardTab:
         plot_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
 
         if not HAS_MATPLOTLIB:
-            # Text fallback for systems without matplotlib
-            ttk.Label(plot_frame, text="Matplotlib not available - Text fallback mode",
-                     font=("Arial", 9)).pack(pady=5)
-            self.text_fallback = tk.Text(plot_frame, height=12, font=("Courier", 10),
-                                          state=tk.DISABLED, bg="#f0f0f0")
-            self.text_fallback.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+            # Canvas-based fallback for systems without matplotlib
+            self._setup_canvas_fallback(plot_frame)
             return
         
         # Plot controls bar
@@ -643,7 +648,344 @@ class DashboardTab:
         self.plot_dirty = True
         if self.canvas:
             self.canvas.draw_idle()
-    
+
+    def _setup_canvas_fallback(self, parent: ttk.Frame):
+        """
+        Setup enhanced Canvas-based fallback for systems without matplotlib.
+
+        Provides a real-time line chart and telemetry display using pure Tkinter.
+        """
+        # Main container
+        main_frame = ttk.Frame(parent)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Header with note
+        header = ttk.Frame(main_frame)
+        header.pack(fill=tk.X, pady=(0, 5))
+        ttk.Label(header, text="Real-Time Monitor",
+                  font=("Arial", 10, "bold")).pack(side=tk.LEFT)
+        ttk.Label(header, text="(matplotlib unavailable)",
+                  font=("Arial", 8), foreground="gray").pack(side=tk.LEFT, padx=10)
+
+        # Controls bar
+        controls = ttk.Frame(main_frame)
+        controls.pack(fill=tk.X, pady=(0, 5))
+
+        self.btn_pause_fallback = ttk.Button(controls, text="⏸ Pause", width=10,
+                                              command=self._toggle_plot_pause)
+        self.btn_pause_fallback.pack(side=tk.LEFT, padx=2)
+
+        ttk.Button(controls, text="Clear", width=8,
+                   command=self._clear_fallback_chart).pack(side=tk.LEFT, padx=2)
+
+        # Trace visibility checkboxes
+        trace_frame = ttk.Frame(controls)
+        trace_frame.pack(side=tk.LEFT, padx=10)
+
+        self.fallback_traces = {
+            'cmd': tk.BooleanVar(value=True),
+            'feedback': tk.BooleanVar(value=True),
+            'error': tk.BooleanVar(value=True),
+        }
+
+        trace_colors = {'cmd': 'blue', 'feedback': 'green', 'error': 'red'}
+        trace_labels = {'cmd': 'Cmd', 'feedback': 'Actual', 'error': 'Error'}
+
+        for name, var in self.fallback_traces.items():
+            cb = ttk.Checkbutton(trace_frame, text=trace_labels[name],
+                                  variable=var)
+            cb.pack(side=tk.LEFT, padx=3)
+
+        # Chart canvas
+        chart_frame = ttk.Frame(main_frame)
+        chart_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Chart dimensions
+        self.chart_width = 500
+        self.chart_height = 200
+        self.chart_margin = {'left': 50, 'right': 20, 'top': 10, 'bottom': 25}
+
+        self.fallback_chart = tk.Canvas(chart_frame, bg="white",
+                                         highlightthickness=1, highlightbackground="#ccc")
+        self.fallback_chart.pack(fill=tk.BOTH, expand=True, pady=5)
+
+        # Bind resize event
+        self.fallback_chart.bind("<Configure>", self._on_fallback_chart_resize)
+
+        # Draw initial grid and axes
+        self._draw_fallback_grid()
+
+        # Legend
+        legend_frame = ttk.Frame(main_frame)
+        legend_frame.pack(fill=tk.X, pady=2)
+
+        for name, color in trace_colors.items():
+            lf = ttk.Frame(legend_frame)
+            lf.pack(side=tk.LEFT, padx=10)
+            legend_canvas = tk.Canvas(lf, width=20, height=10, highlightthickness=0)
+            legend_canvas.pack(side=tk.LEFT, padx=2)
+            legend_canvas.create_line(0, 5, 20, 5, fill=color, width=2)
+            ttk.Label(lf, text=trace_labels[name], font=("Arial", 8)).pack(side=tk.LEFT)
+
+        # Telemetry summary below the chart
+        self._setup_fallback_telemetry(main_frame)
+
+        # Store text_fallback as flag for update loop detection
+        self.text_fallback = True
+
+    def _on_fallback_chart_resize(self, event):
+        """Handle chart canvas resize."""
+        self.chart_width = event.width
+        self.chart_height = event.height
+        self._draw_fallback_grid()
+
+    def _draw_fallback_grid(self):
+        """Draw axis grid on the fallback chart canvas."""
+        if not self.fallback_chart:
+            return
+
+        self.fallback_chart.delete("grid")
+        self.fallback_chart.delete("axis")
+
+        w = self.chart_width
+        h = self.chart_height
+        m = self.chart_margin
+
+        plot_w = w - m['left'] - m['right']
+        plot_h = h - m['top'] - m['bottom']
+
+        if plot_w <= 0 or plot_h <= 0:
+            return
+
+        # Background
+        self.fallback_chart.create_rectangle(m['left'], m['top'],
+                                              w - m['right'], h - m['bottom'],
+                                              fill="#f8f8f8", outline="#ccc", tags="grid")
+
+        # Horizontal grid lines (RPM scale: 0, 500, 1000, 1500, 2000)
+        rpm_values = [0, 500, 1000, 1500, 2000]
+        for rpm in rpm_values:
+            y = m['top'] + plot_h - (rpm / 2000) * plot_h
+            self.fallback_chart.create_line(m['left'], y, w - m['right'], y,
+                                             fill="#ddd", tags="grid")
+            self.fallback_chart.create_text(m['left'] - 5, y, text=str(rpm),
+                                             anchor="e", font=("Arial", 7),
+                                             fill="#666", tags="axis")
+
+        # Y-axis label
+        self.fallback_chart.create_text(12, h / 2, text="RPM", angle=90,
+                                         font=("Arial", 8), fill="#666", tags="axis")
+
+        # Time axis labels (0s to 30s)
+        time_values = [0, 10, 20, 30]
+        for t in time_values:
+            x = m['left'] + (t / 30) * plot_w
+            y = h - m['bottom'] + 10
+            self.fallback_chart.create_text(x, y, text=f"{t}s",
+                                             font=("Arial", 7), fill="#666", tags="axis")
+
+        # X-axis label
+        self.fallback_chart.create_text(w / 2, h - 5, text="Time (seconds)",
+                                         font=("Arial", 8), fill="#666", tags="axis")
+
+    def _clear_fallback_chart(self):
+        """Clear the fallback chart data."""
+        self.fallback_chart_data.clear()
+        if self.fallback_chart:
+            self.fallback_chart.delete("data")
+
+    def _setup_fallback_telemetry(self, parent: ttk.Frame):
+        """Setup telemetry summary display below the chart."""
+        telem_frame = ttk.LabelFrame(parent, text="Live Telemetry", padding="5")
+        telem_frame.pack(fill=tk.X, pady=5)
+
+        # Create a grid layout for metrics
+        self.fallback_labels = {}
+
+        metrics = [
+            ('cmd', 'Command', 'blue', 'RPM'),
+            ('feedback', 'Actual', 'green', 'RPM'),
+            ('error', 'Error', 'red', 'RPM'),
+            ('errorI', 'Integrator', 'orange', ''),
+            ('output', 'PID Output', 'purple', ''),
+            ('revs', 'Revolutions', 'teal', 'rev'),
+        ]
+
+        # Two rows of three metrics
+        row1 = ttk.Frame(telem_frame)
+        row1.pack(fill=tk.X, pady=2)
+        row2 = ttk.Frame(telem_frame)
+        row2.pack(fill=tk.X, pady=2)
+
+        for i, (key, label, color, unit) in enumerate(metrics):
+            frame = row1 if i < 3 else row2
+            metric_frame = ttk.Frame(frame)
+            metric_frame.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=5)
+
+            ttk.Label(metric_frame, text=f"{label}:",
+                      font=("Arial", 9)).pack(side=tk.LEFT)
+
+            value_label = ttk.Label(metric_frame, text="0",
+                                     font=("Courier", 12, "bold"),
+                                     foreground=color, width=8)
+            value_label.pack(side=tk.LEFT, padx=2)
+
+            if unit:
+                ttk.Label(metric_frame, text=unit,
+                          font=("Arial", 8), foreground="gray").pack(side=tk.LEFT)
+
+            self.fallback_labels[key] = value_label
+
+        # Progress bar for command/feedback comparison
+        bar_frame = ttk.Frame(telem_frame)
+        bar_frame.pack(fill=tk.X, pady=(5, 0))
+
+        ttk.Label(bar_frame, text="RPM:", font=("Arial", 8)).pack(side=tk.LEFT)
+
+        self.fallback_bar_canvas = tk.Canvas(bar_frame, height=20,
+                                              highlightthickness=0, bg="#f0f0f0")
+        self.fallback_bar_canvas.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+
+        # Bars will be drawn in update
+
+    def _update_canvas_fallback(self, values: Dict[str, float]):
+        """Update the Canvas-based fallback display."""
+        if not self.fallback_chart:
+            return
+
+        # Extract values
+        cmd = self._coerce_float(values.get('cmd_limited', 0))
+        feedback = self._coerce_float(values.get('feedback', 0))
+        error = self._coerce_float(values.get('error', 0))
+        errorI = self._coerce_float(values.get('errorI', 0))
+        output = self._coerce_float(values.get('output', 0))
+        revs = self._coerce_float(values.get('spindle_revs', 0))
+
+        # Update telemetry labels
+        if hasattr(self, 'fallback_labels'):
+            self.fallback_labels['cmd'].config(text=f"{cmd:.0f}")
+            self.fallback_labels['feedback'].config(text=f"{feedback:.0f}")
+
+            # Color-code error based on magnitude
+            abs_err = abs(error)
+            if abs_err < ERROR_THRESHOLD_EXCELLENT:
+                err_color = "green"
+            elif abs_err < ERROR_THRESHOLD_GOOD:
+                err_color = "blue"
+            elif abs_err < ERROR_THRESHOLD_WARNING:
+                err_color = "orange"
+            else:
+                err_color = "red"
+
+            self.fallback_labels['error'].config(text=f"{error:.1f}", foreground=err_color)
+            self.fallback_labels['errorI'].config(text=f"{errorI:.1f}")
+            self.fallback_labels['output'].config(text=f"{output:.1f}")
+            self.fallback_labels['revs'].config(text=f"{revs:.2f}")
+
+        # Update RPM bar visualization
+        if hasattr(self, 'fallback_bar_canvas'):
+            self._update_fallback_bars(cmd, feedback)
+
+        # Add data point to chart history
+        self.fallback_chart_data.append({
+            'cmd': cmd,
+            'feedback': feedback,
+            'error': error,
+            'time': time.time()
+        })
+
+        # Redraw chart
+        self._draw_fallback_data()
+
+    def _update_fallback_bars(self, cmd: float, feedback: float):
+        """Update the RPM comparison bar."""
+        canvas = self.fallback_bar_canvas
+        canvas.delete("all")
+
+        w = canvas.winfo_width()
+        h = canvas.winfo_height()
+
+        if w < 10:
+            return
+
+        max_rpm = 2000
+        bar_height = 8
+
+        # Command bar (blue)
+        cmd_width = max(0, min(w - 10, (cmd / max_rpm) * (w - 10)))
+        canvas.create_rectangle(5, 2, 5 + cmd_width, 2 + bar_height,
+                                 fill="#4a90d9", outline="")
+        canvas.create_text(8, 2 + bar_height / 2, text="Cmd",
+                            anchor="w", font=("Arial", 6), fill="white")
+
+        # Feedback bar (green)
+        fb_width = max(0, min(w - 10, (feedback / max_rpm) * (w - 10)))
+        canvas.create_rectangle(5, 12, 5 + fb_width, 12 + bar_height,
+                                 fill="#5cb85c", outline="")
+        canvas.create_text(8, 12 + bar_height / 2, text="Act",
+                            anchor="w", font=("Arial", 6), fill="white")
+
+    def _draw_fallback_data(self):
+        """Draw the data lines on the fallback chart."""
+        if not self.fallback_chart or not self.fallback_chart_data:
+            return
+
+        self.fallback_chart.delete("data")
+
+        w = self.chart_width
+        h = self.chart_height
+        m = self.chart_margin
+
+        plot_w = w - m['left'] - m['right']
+        plot_h = h - m['top'] - m['bottom']
+
+        if plot_w <= 0 or plot_h <= 0:
+            return
+
+        data = list(self.fallback_chart_data)
+        if len(data) < 2:
+            return
+
+        # Time range (last 30 seconds)
+        now = time.time()
+        time_window = 30.0
+
+        traces = {
+            'cmd': ('blue', self.fallback_traces.get('cmd', tk.BooleanVar(value=True))),
+            'feedback': ('green', self.fallback_traces.get('feedback', tk.BooleanVar(value=True))),
+            'error': ('red', self.fallback_traces.get('error', tk.BooleanVar(value=True))),
+        }
+
+        for trace_name, (color, visible_var) in traces.items():
+            if not visible_var.get():
+                continue
+
+            points = []
+            for point in data:
+                age = now - point['time']
+                if age > time_window:
+                    continue
+
+                x = m['left'] + ((time_window - age) / time_window) * plot_w
+                value = point.get(trace_name, 0)
+
+                # Scale: RPM 0-2000 for cmd/feedback, -100 to +100 for error
+                if trace_name == 'error':
+                    # Scale error to fit in chart (center at 1000 RPM equivalent)
+                    y_val = 1000 + value * 5  # Scale error by 5x for visibility
+                    y_val = max(0, min(2000, y_val))
+                else:
+                    y_val = max(0, min(2000, value))
+
+                y = m['top'] + plot_h - (y_val / 2000) * plot_h
+                points.append((x, y))
+
+            if len(points) >= 2:
+                # Draw polyline
+                flat_points = [coord for point in points for coord in point]
+                self.fallback_chart.create_line(*flat_points, fill=color,
+                                                 width=2, tags="data", smooth=True)
+
     def _setup_parameters(self, parent: ttk.Frame):
         """Setup parameter tuning controls with groups."""
         param_frame = ttk.LabelFrame(parent, text="Parameters", padding="5")
@@ -895,10 +1237,15 @@ class DashboardTab:
     def _toggle_plot_pause(self):
         """Toggle plot pause state."""
         self.plot_paused = not self.plot_paused
-        if self.plot_paused:
-            self.btn_pause.config(text="▶ Resume")
-        else:
-            self.btn_pause.config(text="⏸ Pause")
+        btn_text = "▶ Resume" if self.plot_paused else "⏸ Pause"
+
+        # Update matplotlib button if it exists
+        if hasattr(self, 'btn_pause') and self.btn_pause:
+            self.btn_pause.config(text=btn_text)
+
+        # Update fallback button if it exists
+        if hasattr(self, 'btn_pause_fallback') and self.btn_pause_fallback:
+            self.btn_pause_fallback.config(text=btn_text)
     
     def _on_time_scale_change(self):
         """Handle time scale change."""
@@ -1285,7 +1632,7 @@ class DashboardTab:
             if HAS_MATPLOTLIB:
                 self._update_plot()
             elif self.text_fallback:
-                self._update_text_fallback(values)
+                self._update_canvas_fallback(values)
     
     def _update_plot(self):
         """
@@ -1409,39 +1756,3 @@ class DashboardTab:
                 self.canvas.blit(self.ax.bbox)
                 self.canvas.flush_events()
     
-    def _update_text_fallback(self, values: Dict[str, float]):
-        """Update text fallback display for systems without matplotlib."""
-        if self.text_fallback is None:
-            return
-        
-        self.text_fallback.config(state=tk.NORMAL)
-        self.text_fallback.delete('1.0', tk.END)
-
-        inner_width = 31
-        label_width = 12
-        value_width = 9
-        unit_width = 6
-
-        def metric_line(label: str, value: float, unit: str, formatter: str) -> str:
-            value_text = formatter.format(value)
-            value_text = value_text.rjust(value_width)
-            content = f"{label:<{label_width}}│ {value_text} {unit:<{unit_width}}"
-            return f"│ {content.ljust(inner_width)} │"
-
-        lines = [
-            "╭" + "─" * inner_width + "╮",
-            f"│ {'SPINDLE TELEMETRY':^{inner_width}} │",
-            "├" + "─" * (label_width + 1) + "┬" + "─" * (inner_width - label_width - 1) + "┤",
-            metric_line("Command", self._coerce_float(values.get('cmd_limited', 0)), "RPM", "{:.0f}"),
-            metric_line("Feedback", self._coerce_float(values.get('feedback', 0)), "RPM", "{:.0f}"),
-            metric_line("Error", self._coerce_float(values.get('error', 0)), "RPM", "{:.1f}"),
-            metric_line("Integrator", self._coerce_float(values.get('errorI', 0)), "", "{:.1f}"),
-            metric_line("PID Output", self._coerce_float(values.get('output', 0)), "", "{:.1f}"),
-            metric_line("Revs", self._coerce_float(values.get('spindle_revs', 0)), "rev", "{:.2f}"),
-            "├" + "─" * inner_width + "┤",
-            f"│ {'Time: ' + time.strftime('%H:%M:%S'):<{inner_width}} │",
-            "╰" + "─" * inner_width + "╯",
-        ]
-
-        self.text_fallback.insert(tk.END, "\n".join(lines))
-        self.text_fallback.config(state=tk.DISABLED)
