@@ -437,7 +437,10 @@ class DashboardTab:
         top = ttk.Frame(frame)
         top.pack(fill=tk.X, pady=2)
         ttk.Label(top, text="RPM:").pack(side=tk.LEFT)
-        self.speed_entry = ttk.Entry(top, width=6)
+        # Register validation command to allow only numeric input
+        vcmd = (top.register(self._validate_speed_entry), '%P')
+        self.speed_entry = ttk.Entry(top, width=6, validate='key',
+                                     validatecommand=vcmd)
         self.speed_entry.insert(0, "1000")
         self.speed_entry.pack(side=tk.LEFT, padx=(2, 4))
         self.speed_entry.bind('<Return>', lambda e: self._go_to_speed())
@@ -1274,7 +1277,20 @@ class DashboardTab:
     def _stop_spindle(self):
         """Stop spindle."""
         self.hal.send_mdi("M5")
-    
+
+    def _validate_speed_entry(self, proposed: str) -> bool:
+        """Validate speed entry to allow only positive integers.
+
+        Args:
+            proposed: The proposed new value after the edit.
+
+        Returns:
+            True to accept the input, False to reject it.
+        """
+        if proposed == "":
+            return True  # Allow empty for deletion
+        return proposed.isdigit()
+
     def _go_to_speed(self):
         """Go to speed from entry field."""
         try:
