@@ -56,6 +56,17 @@ class SpindleTunerApp:
         self.root.title(APP_TITLE + (" [MOCK MODE]" if mock else ""))
         self.root.geometry("1400x900")
         self.root.minsize(1000, 700)  # Prevent UI breaking at small sizes
+
+        style = ttk.Style()
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
+
+        self.root.tk.call("tk", "scaling", 1.25)
+        default_font = ("Segoe UI", 9)
+        style.configure(".", font=default_font)
+        style.configure("TLabelframe.Label", font=("Segoe UI", 9, "bold"))
         
         # Initialize core services
         logger.info("Initializing core services...")
