@@ -73,6 +73,7 @@ class SpindleTunerApp:
         # Reconnect backoff (prevent thrashing at 100ms intervals)
         self._last_reconnect_attempt = 0.0
         self._reconnect_interval_s = 5.0  # Only attempt reconnect every 5 seconds
+        self._reconnect_in_progress = False
         
         # Store default background for fault status
         self.default_bg = self.root.cget('bg')
@@ -82,9 +83,9 @@ class SpindleTunerApp:
         self._setup_main_layout()
         self._setup_status_bar()
         self._bind_shortcuts()
-        
+
         # Start update loop
-        self._last_update_time = time.time()
+        self._last_update_time = time.monotonic()
         self._update_count = 0
         self._start_update_loop()
         
@@ -229,31 +230,37 @@ class SpindleTunerApp:
     def _bind_shortcuts(self):
         """Bind keyboard shortcuts."""
         # File operations (both cases for Caps Lock compatibility)
-        self.root.bind('<Control-n>', lambda e: self._new_session())
-        self.root.bind('<Control-N>', lambda e: self._new_session())
-        self.root.bind('<Control-o>', lambda e: self._load_profile())
-        self.root.bind('<Control-O>', lambda e: self._load_profile())
-        self.root.bind('<Control-s>', lambda e: self._save_profile())
-        self.root.bind('<Control-S>', lambda e: self._save_profile())
-        self.root.bind('<Control-e>', lambda e: self._export_csv())
-        self.root.bind('<Control-E>', lambda e: self._export_csv())
-        self.root.bind('<Control-q>', lambda e: self._on_closing())
-        self.root.bind('<Control-Q>', lambda e: self._on_closing())
+        self.root.bind('<Control-n>', lambda e: self._new_session(), add="+")
+        self.root.bind('<Control-N>', lambda e: self._new_session(), add="+")
+        self.root.bind('<Control-o>', lambda e: self._load_profile(), add="+")
+        self.root.bind('<Control-O>', lambda e: self._load_profile(), add="+")
+        self.root.bind('<Control-s>', lambda e: self._save_profile(), add="+")
+        self.root.bind('<Control-S>', lambda e: self._save_profile(), add="+")
+        self.root.bind('<Control-e>', lambda e: self._export_csv(), add="+")
+        self.root.bind('<Control-E>', lambda e: self._export_csv(), add="+")
+        self.root.bind('<Control-q>', lambda e: self._on_closing(), add="+")
+        self.root.bind('<Control-Q>', lambda e: self._on_closing(), add="+")
         
         # Spindle control
-        self.root.bind('<F5>', lambda e: self.tests.run_step_test())
-        self.root.bind('<F8>', lambda e: self.tests.run_full_suite())
-        self.root.bind('<space>', lambda e: self._toggle_spindle())
-        self.root.bind('<Escape>', lambda e: self._emergency_stop())
+        self.root.bind('<F5>', lambda e: self._consume_event(self.tests.run_step_test), add="+")
+        self.root.bind('<F8>', lambda e: self.tests.run_full_suite(), add="+")
+        self.root.bind('<space>', lambda e: self._toggle_spindle(), add="+")
+        self.root.bind('<Escape>', lambda e: self._consume_event(self._emergency_stop), add="+")
         
         # Tab navigation (Ctrl+1 through Ctrl+5)
         for i in range(5):
-            self.root.bind(f'<Control-Key-{i+1}>', 
-                          lambda e, idx=i: self._select_tab(idx))
+            self.root.bind(f'<Control-Key-{i+1}>',
+                          lambda e, idx=i: self._select_tab(idx), add="+")
         
         # Tab navigation (Ctrl+Page Up/Down)
-        self.root.bind('<Control-Prior>', lambda e: self._prev_tab())
-        self.root.bind('<Control-Next>', lambda e: self._next_tab())
+        self.root.bind('<Control-Prior>', lambda e: self._prev_tab(), add="+")
+        self.root.bind('<Control-Next>', lambda e: self._next_tab(), add="+")
+
+    @staticmethod
+    def _consume_event(func):
+        """Invoke a function from a keybinding and signal event consumption."""
+        func()
+        return "break"
     
     def _select_tab(self, index: int):
         """Select a notebook tab by index."""
@@ -279,7 +286,7 @@ class SpindleTunerApp:
 
     def _update(self):
         """Main update loop - called every UPDATE_INTERVAL_MS."""
-        start_time = time.time()
+        start_time = time.monotonic()
         try:
             # 1. Update Connection Status
             self._update_connection_status()
@@ -311,11 +318,11 @@ class SpindleTunerApp:
             # 6. Update general status bar info (rate, time)
             self._update_status_bar_metrics()
             
-        except Exception as e:
-            logger.error(f"Update loop error: {e}")
+        except Exception:
+            logger.exception("Update loop error")
 
         # Schedule next update
-        elapsed = (time.time() - start_time) * 1000
+        elapsed = (time.monotonic() - start_time) * 1000
         next_delay = max(1, int(UPDATE_INTERVAL_MS - elapsed))
         self.root.after(next_delay, self._update)
 
@@ -323,7 +330,7 @@ class SpindleTunerApp:
         """Start background worker to fetch HAL values."""
         def worker():
             while not self._hal_stop_event.is_set():
-                loop_start = time.time()
+                loop_start = time.monotonic()
                 try:
                     values = self.hal.get_all_values()
                     try:
@@ -334,7 +341,7 @@ class SpindleTunerApp:
                 except Exception as e:
                     logger.error(f"HAL fetch error: {e}")
 
-                elapsed = time.time() - loop_start
+                elapsed = time.monotonic() - loop_start
                 sleep_time = max(0, (UPDATE_INTERVAL_MS / 1000.0) - elapsed)
                 self._hal_stop_event.wait(sleep_time)
 
@@ -369,11 +376,32 @@ class SpindleTunerApp:
             self.status_conn.config(text="◌ Connecting...", foreground="blue")
         else:  # DISCONNECTED or ERROR
             self.status_conn.config(text="● Disconnected", foreground="red")
-            # Only attempt reconnect with backoff to prevent thrashing
-            now = time.time()
+
+        reconnect_needed = (
+            state in {ConnectionState.DISCONNECTED, ConnectionState.ERROR}
+            or (state == ConnectionState.MOCK and not self.hal.forced_mock)
+        )
+
+        if reconnect_needed:
+            now = time.monotonic()
             if now - self._last_reconnect_attempt >= self._reconnect_interval_s:
                 self._last_reconnect_attempt = now
+                self._start_reconnect_thread()
+
+    def _start_reconnect_thread(self):
+        """Attempt reconnect without blocking the UI thread."""
+        if self._reconnect_in_progress:
+            return
+
+        self._reconnect_in_progress = True
+
+        def _worker():
+            try:
                 self.hal.reconnect()
+            finally:
+                self._reconnect_in_progress = False
+
+        threading.Thread(target=_worker, daemon=True).start()
     
     def _update_fault_status(self):
         """Monitor safety signals and update fault display."""
@@ -397,7 +425,7 @@ class SpindleTunerApp:
         """Update rate and time in status bar."""
         # Update rate calculation
         self._update_count += 1
-        now = time.time()
+        now = time.monotonic()
         elapsed = now - self._last_update_time
         
         if elapsed >= 1.0:
@@ -418,11 +446,12 @@ class SpindleTunerApp:
         """Toggle spindle on/off."""
         focused = self.root.focus_get()
         if isinstance(focused, (tk.Entry, tk.Text, ttk.Entry)):
-            return
+            return "break"
 
         if self.current_values.get('spindle_on', 0) > 0.5:
             self.hal.send_mdi("M5")
             logger.info("Spindle stop requested (Spacebar)")
+            return "break"
         else:
             if not self._last_commanded_direction or self._last_commanded_speed is None:
                 messagebox.showwarning(
@@ -431,11 +460,12 @@ class SpindleTunerApp:
                     " Please start the spindle manually from the controls."
                 )
                 logger.warning("Spindle start via toggle blocked: unknown previous state")
-                return
+                return "break"
 
             command = f"{self._last_commanded_direction} S{int(round(self._last_commanded_speed))}"
             self.hal.send_mdi(command)
             logger.info("Spindle start requested (Spacebar)")
+            return "break"
     
     def _emergency_stop(self):
         """Emergency stop spindle - immediate, no dialogs."""
@@ -459,12 +489,9 @@ class SpindleTunerApp:
     
     def _on_closing(self):
         """Handle application closure with safety check."""
-        try:
-            self.hal.send_mdi("M5")
-        except Exception:
-            logger.warning("Failed to issue spindle stop on exit")
+        spindle_running = self.current_values.get('spindle_on', 0) > 0.5
 
-        if self.current_values.get('spindle_on', 0) > 0.5:
+        if spindle_running:
             prompt = (
                 "The spindle is currently running.\n\n"
                 "Yes = Stop spindle and exit\n"
@@ -478,6 +505,11 @@ class SpindleTunerApp:
             elif result:  # Yes - stop spindle first
                 self.hal.send_mdi("M5")
                 logger.info("Spindle stopped on exit")
+        else:
+            try:
+                self.hal.send_mdi("M5")
+            except Exception:
+                logger.warning("Failed to issue spindle stop on exit")
 
         self._hal_stop_event.set()
 
