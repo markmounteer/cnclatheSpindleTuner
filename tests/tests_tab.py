@@ -16,7 +16,7 @@ import csv
 from datetime import datetime
 from typing import Optional, Callable, Dict
 
-from config import MONITOR_PINS, BASELINE_PARAMS, MOTOR_SPECS, VFD_SPECS, ENCODER_SPECS
+from config import BASELINE_PARAMS, MOTOR_SPECS, VFD_SPECS, ENCODER_SPECS
 
 # Import all test classes
 from tests.test_signal_chain import SignalChainTest
@@ -553,7 +553,7 @@ class TestsTab:
                             writer.writerow([timestamp, line])
             else:
                 with open(filepath, 'w') as f:
-                    f.write(f"Spindle Tuner Test Log\n")
+                    f.write("Spindle Tuner Test Log\n")
                     f.write(f"Exported: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
                     f.write("=" * 50 + "\n\n")
                     f.write(log_text)

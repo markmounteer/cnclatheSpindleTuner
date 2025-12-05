@@ -7,7 +7,7 @@ correctly initialized.
 """
 
 from config import MONITOR_PINS, BASELINE_PARAMS
-from tests.base import BaseTest, TestDescription
+from tests.base import BaseTest, ProcedureDescription
 
 
 class SignalChainTest(BaseTest):
@@ -17,8 +17,8 @@ class SignalChainTest(BaseTest):
     GUIDE_REF = "Guide §5.1"
 
     @classmethod
-    def get_description(cls) -> TestDescription:
-        return TestDescription(
+    def get_description(cls) -> ProcedureDescription:
+        return ProcedureDescription(
             name="Signal Chain Integrity Check",
             guide_ref="§5.1",
             purpose="""

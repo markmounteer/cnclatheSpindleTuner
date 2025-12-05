@@ -14,7 +14,7 @@ except ImportError:
     messagebox = None
     _HAS_TKINTER = False
 
-from tests.base import BaseTest, TestDescription, TARGETS
+from tests.base import BaseTest, ProcedureDescription, TARGETS
 
 
 class StepTest(BaseTest):
@@ -40,8 +40,8 @@ class StepTest(BaseTest):
         self.step_to = step_to
 
     @classmethod
-    def get_description(cls) -> TestDescription:
-        return TestDescription(
+    def get_description(cls) -> ProcedureDescription:
+        return ProcedureDescription(
             name="Step Response Test",
             guide_ref="§7.1",
             purpose="""

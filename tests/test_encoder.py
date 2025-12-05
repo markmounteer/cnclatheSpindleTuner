@@ -8,7 +8,7 @@ import time
 from typing import Dict, List, Tuple
 
 from config import MONITOR_PINS
-from tests.base import BaseTest, TestDescription, TARGETS
+from tests.base import BaseTest, ProcedureDescription, TARGETS
 
 
 class EncoderTest(BaseTest):
@@ -33,8 +33,8 @@ class EncoderTest(BaseTest):
     INTER_SPEED_DELAY: float = 2.0  # Seconds to wait between speeds
 
     @classmethod
-    def get_description(cls) -> TestDescription:
-        return TestDescription(
+    def get_description(cls) -> ProcedureDescription:
+        return ProcedureDescription(
             name="Encoder Verification",
             guide_ref="§5.2, §12.2",
             purpose="""
@@ -141,7 +141,7 @@ identify configuration issues.""",
 
             # Check for no feedback (encoder disconnected/faulty)
             if abs(avg) < 1.0:
-                self.log_result(f"  [FAIL] NO FEEDBACK detected (~0 RPM)")
+                self.log_result("  [FAIL] NO FEEDBACK detected (~0 RPM)")
                 self.log_result("    -> Check encoder connection/power")
             elif avg < 0:
                 self.log_result(f"  [FAIL] NEGATIVE feedback: {avg:.1f} RPM")

@@ -10,7 +10,7 @@ import time
 from datetime import datetime
 
 from config import MONITOR_PINS
-from tests.base import BaseTest, TestDescription, TARGETS
+from tests.base import BaseTest, ProcedureDescription, TARGETS
 
 
 class SteadyStateTest(BaseTest):
@@ -36,8 +36,8 @@ class SteadyStateTest(BaseTest):
         self.target_rpm = max(100, min(3000, rpm))
 
     @classmethod
-    def get_description(cls) -> TestDescription:
-        return TestDescription(
+    def get_description(cls) -> ProcedureDescription:
+        return ProcedureDescription(
             name="Steady-State Accuracy Test",
             guide_ref="§7.3",
             purpose="""

@@ -14,7 +14,7 @@ except ImportError:
     messagebox = None
     _HAS_TKINTER = False
 
-from tests.base import BaseTest, TestDescription
+from tests.base import BaseTest, ProcedureDescription
 
 
 class FullSuiteTest(BaseTest):
@@ -32,8 +32,8 @@ class FullSuiteTest(BaseTest):
         self.test_instances = instances
 
     @classmethod
-    def get_description(cls) -> TestDescription:
-        return TestDescription(
+    def get_description(cls) -> ProcedureDescription:
+        return ProcedureDescription(
             name="Full Test Suite",
             guide_ref="",
             purpose="""

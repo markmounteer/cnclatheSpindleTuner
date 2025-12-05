@@ -7,7 +7,7 @@ Measures motor slip with feedforward only (no PID correction).
 import time
 
 from config import MONITOR_PINS, MOTOR_SPECS
-from tests.base import BaseTest, TestDescription
+from tests.base import BaseTest, ProcedureDescription
 
 
 class OpenLoopTest(BaseTest):
@@ -17,8 +17,8 @@ class OpenLoopTest(BaseTest):
     GUIDE_REF = "Guide §6.1"
 
     @classmethod
-    def get_description(cls) -> TestDescription:
-        return TestDescription(
+    def get_description(cls) -> ProcedureDescription:
+        return ProcedureDescription(
             name="Open Loop Check",
             guide_ref="§6.1",
             purpose="""
@@ -135,7 +135,7 @@ motor, 3-4% for hot motor) which the PID I-term must compensate.""",
             slip = ((abs(cmd) - abs(fb)) / abs(cmd) * 100) if abs(cmd) > 0 else 0
             expected_slip = MOTOR_SPECS.get('cold_slip_pct', 2.7)
 
-            self.log_result(f"\nResults:")
+            self.log_result("\nResults:")
             self.log_result(f"  Command: {cmd:.0f} RPM")
             self.log_result(f"  Feedback: {fb:.0f} RPM (noise: +/-{fb_noise/2:.1f})")
             self.log_result(f"  Measured slip: {slip:.1f}%")

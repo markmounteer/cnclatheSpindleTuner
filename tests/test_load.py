@@ -7,7 +7,7 @@ Interactive test to measure load disturbance rejection.
 import time
 
 from config import MONITOR_PINS
-from tests.base import BaseTest, TestDescription, TARGETS
+from tests.base import BaseTest, ProcedureDescription, TARGETS
 
 
 class LoadTest(BaseTest):
@@ -17,8 +17,8 @@ class LoadTest(BaseTest):
     GUIDE_REF = "Guide §7.2"
 
     @classmethod
-    def get_description(cls) -> TestDescription:
-        return TestDescription(
+    def get_description(cls) -> ProcedureDescription:
+        return ProcedureDescription(
             name="Interactive Load Test",
             guide_ref="§7.2",
             purpose="""
@@ -132,7 +132,7 @@ when prompted, then release to measure recovery.""",
             metrics = self.logger.calculate_load_metrics(samples, baseline)
             recovery_time = metrics.load_recovery_time_s if metrics.load_recovery_time_s > 0 else None
 
-            self.log_result(f"\nResults:")
+            self.log_result("\nResults:")
             self.log_result(f" Baseline: {baseline:.0f} RPM")
             self.log_result(f" Minimum during load: {min_rpm:.0f} RPM")
             self.log_result(f" Max droop: {max_droop:.0f} RPM ({max_droop / baseline * 100:.1f}%)")
