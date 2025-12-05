@@ -43,6 +43,16 @@ from config import (
 logger = logging.getLogger(__name__)
 
 
+def _get_spec_value(mapping: Dict[str, Any], key: str, default: float) -> float:
+    """Safely fetch a spec value, falling back to a default on missing keys."""
+
+    try:
+        value = mapping.get(key, default)
+        return float(value)
+    except Exception:
+        return float(default)
+
+
 # =============================================================================
 # PLATFORM DETECTION
 # =============================================================================
@@ -147,16 +157,16 @@ class MockState:
 @dataclass
 class PhysicsParameters:
     """Configurable physics simulation parameters."""
-    vfd_delay_s: float = field(default_factory=lambda: VFD_SPECS['transport_delay_s'])
+    vfd_delay_s: float = field(default_factory=lambda: _get_spec_value(VFD_SPECS, 'transport_delay_s', 1.5))
     max_noise_rpm: float = 3.0
     low_speed_noise_rpm: float = 15.0
-    slip_cold_pct: float = field(default_factory=lambda: MOTOR_SPECS['cold_slip_pct'])
-    slip_hot_pct: float = field(default_factory=lambda: MOTOR_SPECS['hot_slip_pct'])
-    thermal_time_constant_min: float = field(default_factory=lambda: MOTOR_SPECS['thermal_time_const_min'])
-    rate_limit_rpm_s: float = field(default_factory=lambda: BASELINE_PARAMS['RateLimit'])
+    slip_cold_pct: float = field(default_factory=lambda: _get_spec_value(MOTOR_SPECS, 'cold_slip_pct', 0.0))
+    slip_hot_pct: float = field(default_factory=lambda: _get_spec_value(MOTOR_SPECS, 'hot_slip_pct', 0.0))
+    thermal_time_constant_min: float = field(default_factory=lambda: _get_spec_value(MOTOR_SPECS, 'thermal_time_const_min', 20.0))
+    rate_limit_rpm_s: float = field(default_factory=lambda: _get_spec_value(BASELINE_PARAMS, 'RateLimit', 1200.0))
     filter_gain: float = 0.5
     # Max RPM based on VFD max frequency for a 4-pole motor: (120 * max_freq) / 4
-    max_rpm: float = field(default_factory=lambda: (120.0 * VFD_SPECS['max_freq_hz']) / 4)
+    max_rpm: float = field(default_factory=lambda: (120.0 * _get_spec_value(VFD_SPECS, 'max_freq_hz', 60.0)) / 4)
 
 
 # =============================================================================
@@ -211,7 +221,7 @@ class MockPhysicsEngine:
         # === THERMAL TRACKING (exponential model) ===
         thermal_tau = max(1e-6, self.physics.thermal_time_constant_min * 60)  # seconds
         max_thermal_factor = 1.0 + (self.physics.slip_hot_pct - self.physics.slip_cold_pct) / 100
-        
+
         if target > 0:
             self.state.time_running += dt
             self.state.thermal_factor = 1.0 + (max_thermal_factor - 1.0) * (1.0 - math.exp(-self.state.time_running / thermal_tau))
@@ -247,6 +257,23 @@ class MockPhysicsEngine:
         if self.state.vfd_fault:
             alpha *= 0.1
 
+        # === DIRECTION / POLARITY ===
+        if self.state.direction != SpindleDirection.STOPPED:
+            self.state.last_direction = self.state.direction
+
+        active_direction = self.state.direction
+        if active_direction == SpindleDirection.STOPPED and current_rpm > 1.0:
+            active_direction = self.state.last_direction
+
+        dir_mult = active_direction.value if active_direction != SpindleDirection.STOPPED else 0
+        command_dir = (
+            active_direction.value
+            if active_direction != SpindleDirection.STOPPED
+            else self.state.last_direction.value
+        )
+        polarity_mult = -1 if self.state.polarity_reversed else 1
+        command_sign = command_dir * polarity_mult
+
         # === PID SIMULATION ===
         FF0 = params.get('FF0', 1.0)
         FF1 = params.get('FF1', 0.35)
@@ -255,8 +282,11 @@ class MockPhysicsEngine:
         D = params.get('D', 0.0)
         max_error_i = params.get('MaxErrorI', 60.0)
 
-        # Use filtered feedback to align with actual PID component behavior
-        error = limited_cmd - self.state.rpm_filtered
+        # Use signed command/feedback to keep PID math consistent with exported values
+        signed_limited_cmd = limited_cmd * command_sign
+        signed_feedback = self.state.rpm_filtered * command_sign
+
+        error = signed_limited_cmd - signed_feedback
         p_term = P * error
 
         self.state.error_i += error * dt * I
@@ -267,14 +297,14 @@ class MockPhysicsEngine:
             d_term = D * (error - self.state.prev_error) / max(dt, 1e-6)
         self.state.prev_error = error
 
-        ff1_term = FF1 * (limited_cmd - self.state.prev_limited_cmd) / max(dt, 1e-6)
-        self.state.prev_limited_cmd = limited_cmd
+        ff1_term = FF1 * (signed_limited_cmd - self.state.prev_limited_cmd) / max(dt, 1e-6)
+        self.state.prev_limited_cmd = signed_limited_cmd
 
         pid_correction = p_term + self.state.error_i + d_term
-        vfd_output = limited_cmd * FF0 + ff1_term + pid_correction
+        vfd_output = signed_limited_cmd * FF0 + ff1_term + pid_correction
 
         # === FINAL MOTOR RESPONSE ===
-        motor_target = vfd_output * (1.0 - total_slip)
+        motor_target = abs(vfd_output) * (1.0 - total_slip)
 
         if self.state.vfd_fault:
             current_rpm = current_rpm * 0.95  # Rapid decel on fault
@@ -313,33 +343,19 @@ class MockPhysicsEngine:
 
         # === REVOLUTIONS TRACKING ===
         rps = current_rpm / 60.0
-        if self.state.direction != SpindleDirection.STOPPED:
-            self.state.last_direction = self.state.direction
-
-        active_direction = self.state.direction
-        if active_direction == SpindleDirection.STOPPED and current_rpm > 1.0:
-            active_direction = self.state.last_direction
-
-        dir_mult = active_direction.value if active_direction != SpindleDirection.STOPPED else 0
-        command_dir = (
-            active_direction.value
-            if active_direction != SpindleDirection.STOPPED
-            else self.state.last_direction.value
-        )
         self.state.revolutions += rps * dt * dir_mult
         
         # === BUILD OUTPUT VALUES ===
-        polarity_mult = -1 if self.state.polarity_reversed else 1
         filtered_rpm = self.state.rpm_filtered
-        signed_rpm = filtered_rpm * dir_mult * polarity_mult
+        signed_rpm = filtered_rpm * command_sign
         # Keep raw feedback aligned with filtered feedback for deterministic mock tests
         signed_rpm_raw = signed_rpm
-        abs_rpm = abs(signed_rpm)
+        abs_rpm = abs(filtered_rpm)
         encoder_scale = -4096 if self.state.polarity_reversed else 4096
-        signed_cmd_raw = target * command_dir
-        signed_cmd_limited = limited_cmd * command_dir
-        
-        at_speed = abs(limited_cmd - filtered_rpm) < params.get('Deadband', 10) * 2
+        signed_cmd_raw = target * command_sign
+        signed_cmd_limited = signed_limited_cmd
+
+        at_speed = abs(signed_limited_cmd - signed_rpm) < params.get('Deadband', 10) * 2
         external_ok = 0.0 if (self.state.encoder_fault or self.state.vfd_fault or 
                               self.state.estop_triggered) else 1.0
         
@@ -796,6 +812,23 @@ class HalInterface:
 
         lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
 
+        def _fallback_individual_reads() -> Dict[str, float]:
+            for pin in pin_list:
+                values[pin] = self._read_hal_pin(pin)
+            if values:
+                with self._lock:
+                    now = time.monotonic()
+                    for pin, val in values.items():
+                        self._cache[pin] = CachedValue(val, now)
+            return values
+
+        if result.stderr.strip():
+            logger.warning(
+                "halcmd bulk read returned stderr; falling back to per-pin reads: "
+                f"{result.stderr.strip()}"
+            )
+            return _fallback_individual_reads()
+
         # Parse results - with -s flag, each getp outputs exactly one line
         # If a pin doesn't exist, halcmd prints an error to stderr and
         # may skip that output line. When this happens, we cannot reliably
@@ -807,19 +840,7 @@ class HalInterface:
                 f"Bulk read output mismatch ({len(lines)} lines for "
                 f"{len(pin_list)} pins); falling back to individual reads"
             )
-            for pin in pin_list:
-                values[pin] = self._read_hal_pin(pin)
-            if values:
-                with self._lock:
-                    now = time.monotonic()
-                    for pin, val in values.items():
-                        self._cache[pin] = CachedValue(val, now)
-            return values
-
-        # Log stderr if present (may contain warnings) but continue if
-        # line count matches - the values are likely still valid
-        if result.stderr.strip():
-            logger.debug(f"halcmd bulk read stderr (continuing): {result.stderr.strip()}")
+            return _fallback_individual_reads()
 
         try:
             parsed_values = [self._parse_hal_value(line.strip()) for line in lines]
@@ -1090,6 +1111,7 @@ class HalInterface:
         try:
             # Build commands for stdin
             commands = []
+            attempted_pins: List[str] = []
             for param_name, value in params.items():
                 if param_name not in TUNING_PARAMS:
                     continue
@@ -1115,6 +1137,7 @@ class HalInterface:
 
                 pin_name = meta[0]
                 commands.append(f"setp {pin_name} {value}")
+                attempted_pins.append(pin_name)
 
             if not commands:
                 # All params were unknown - already warned above
@@ -1129,20 +1152,17 @@ class HalInterface:
                 timeout=3.0
             )
 
-            if result.returncode == 0:
-                # Invalidate cache for all modified pins
-                with self._lock:
-                    for param_name in params:
-                        if param_name in TUNING_PARAMS:
-                            meta = TUNING_PARAMS[param_name]
-                            if meta and meta[0]:
-                                self._cache.pop(meta[0], None)
+            # Invalidate cache for all attempted pins even on partial failure
+            with self._lock:
+                for pin_name in attempted_pins:
+                    self._cache.pop(pin_name, None)
 
+            if result.returncode == 0:
                 logger.info(f"Bulk set {len(commands)} params")
                 return True
-            else:
-                logger.error(f"halcmd bulk set failed: {result.stderr}")
-                return False
+
+            logger.error(f"halcmd bulk set failed: {result.stderr}")
+            return False
                 
         except subprocess.TimeoutExpired:
             logger.error("Timeout during bulk param set")
@@ -1175,12 +1195,28 @@ class HalInterface:
         try:
             self._linuxcnc_stat.poll()
 
+            if self._linuxcnc_stat.task_state == linuxcnc.STATE_ESTOP:
+                self._linuxcnc_cmd.state(linuxcnc.STATE_ESTOP_RESET)
+                self._linuxcnc_cmd.wait_complete(2.0)
+
+            if self._linuxcnc_stat.task_state != linuxcnc.STATE_ON:
+                self._linuxcnc_cmd.state(linuxcnc.STATE_ON)
+                self._linuxcnc_cmd.wait_complete(2.0)
+
+            self._linuxcnc_stat.poll()
+            if self._linuxcnc_stat.task_state != linuxcnc.STATE_ON:
+                raise RuntimeError("Machine not enabled for MDI")
+
+            if self._linuxcnc_stat.interp_state not in (linuxcnc.INTERP_IDLE, linuxcnc.INTERP_PAUSED):
+                raise RuntimeError(f"Interpreter busy (state={self._linuxcnc_stat.interp_state})")
+
             # Switch to MDI mode if needed
             if self._linuxcnc_stat.task_mode != linuxcnc.MODE_MDI:
                 self._linuxcnc_cmd.mode(linuxcnc.MODE_MDI)
                 self._linuxcnc_cmd.wait_complete(2.0)
-            
+
             self._linuxcnc_cmd.mdi(command)
+            self._linuxcnc_cmd.wait_complete(2.0)
             logger.info(f"Sent MDI: {command}")
             return True
             
