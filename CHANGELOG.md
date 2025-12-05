@@ -1,3 +1,35 @@
+# Spindle Tuner v6.0 - logger.py Review (2025-02-14)
+
+## Summary
+
+Reviewed `logger.py` using the structured multi-pass process. Fixed one confirmed
+runtime bug in the recording reset logic and confirmed no additional issues
+requiring documentation in the potential registers.
+
+---
+
+## Corrections Applied
+
+### 1. Fixed undefined buffer clears in `clear_recording`
+
+- **Problem**: The method attempted to clear attributes (`cmd_buffer`,
+  `feedback_buffer`, `error_buffer`, `errorI_buffer`) that do not exist on the
+  logger, which would raise `AttributeError` when resetting recordings.
+- **Fix**: Now resets the time buffer and clears all trace buffers defined in
+  `trace_buffers` to keep recording state consistent without referencing
+  undefined attributes.
+
+## Documentation Updated
+
+- Reviewed registers; no new potential errors or features were added for this
+  file during this pass.
+- `rejected_changes.md` remains with zero entries after confirmation that no
+  prior submissions exist for `logger.py`.
+
+## Verification
+
+- `python -m py_compile logger.py`
+
 # Spindle Tuner v6.0 - tests_pytest Review (2025-12-05)
 
 ## Summary
@@ -423,6 +455,13 @@ All changes verified with `python3 -m py_compile`:
 ## Summary
 
 Reviewed `pytest.ini` with the structured multi-pass process. No confirmed errors were found, so no changes were required to the test configuration file. No new potential errors or feature ideas were identified during this review.
+# Spindle Tuner v6.0 - logger.py Review (2025-02-14)
+
+## Summary
+
+Reviewed `logger.py` using the structured multi-pass process. Fixed one confirmed
+runtime bug in the recording reset logic and confirmed no additional issues
+requiring documentation in the potential registers.
 
 ---
 
@@ -439,3 +478,24 @@ Reviewed `pytest.ini` with the structured multi-pass process. No confirmed error
 
 - Not run (documentation-only updates).
 
+### 1. Fixed undefined buffer clears in `clear_recording`
+
+- **Problem**: The method attempted to clear attributes (`cmd_buffer`,
+  `feedback_buffer`, `error_buffer`, `errorI_buffer`) that do not exist on the
+  logger, which would raise `AttributeError` when resetting recordings.
+- **Fix**: Now resets the time buffer and clears all trace buffers defined in
+  `trace_buffers` to keep recording state consistent without referencing
+  undefined attributes.
+
+## Documentation Updated
+
+- Reviewed registers; no new potential errors or features were added for this
+  file during this pass.
+- `rejected_changes.md` remains with zero entries after confirmation that no
+  prior submissions exist for `logger.py`.
+
+## Verification
+
+- `python -m py_compile logger.py`
+
+# Spindle Tuner v6.0 - tests_pytest Review (2025-12-05)
