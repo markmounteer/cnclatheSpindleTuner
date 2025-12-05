@@ -1,3 +1,40 @@
+# Spindle Tuner v6.0 - logger.py Review (2025-12-05)
+
+## Summary
+
+Reviewed logger.py for errors. Fixed 1 confirmed bug and documented potential issues and feature suggestions for review.
+
+## Corrections Applied
+
+### Bug Fix: clear_recording() References Non-Existent Attributes (logger.py)
+
+**Problem**: Lines 164-167 in `clear_recording()` referenced non-existent attributes (`self.cmd_buffer`, `self.feedback_buffer`, `self.error_buffer`, `self.errorI_buffer`). These would cause `AttributeError` at runtime since the class uses `self.trace_buffers` dict instead.
+
+**Fix**: Replaced individual buffer references with iteration over `self.trace_buffers.values()`, matching the pattern used in `clear_buffers()`.
+
+```python
+# Before (broken)
+self.cmd_buffer.clear()
+self.feedback_buffer.clear()
+self.error_buffer.clear()
+self.errorI_buffer.clear()
+
+# After (fixed)
+for buf in self.trace_buffers.values():
+    buf.clear()
+```
+
+## Documentation Created
+
+- **potential_errors.md**: Documented 2 uncertain issues requiring verification
+- **potential_features.md**: Documented 4 enhancement suggestions for future consideration
+
+## Verification
+
+- Syntax check: `python3 -m py_compile logger.py` passed
+
+---
+
 # Spindle Tuner v6.0 - Code Quality Improvements
 
 ## Summary
