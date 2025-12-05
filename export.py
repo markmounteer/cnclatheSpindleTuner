@@ -15,9 +15,19 @@ This module provides:
 import json
 import logging
 import re
-import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, simpledialog
 from dataclasses import dataclass
+
+try:
+    import tkinter as tk
+    from tkinter import ttk, filedialog, messagebox, simpledialog
+    _HAS_TKINTER = True
+except ImportError:
+    tk = None
+    ttk = None
+    filedialog = None
+    messagebox = None
+    simpledialog = None
+    _HAS_TKINTER = False
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Callable, TypedDict

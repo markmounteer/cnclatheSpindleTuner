@@ -29,8 +29,18 @@ Test Categories:
 """
 
 from tests.base import BaseTest, PerformanceTargets, TARGETS, TestDescription
-from tests.tests_tab import TestsTab
-from tests.checklists_tab import ChecklistsTab, ChecklistWidget
+
+# Conditionally import UI components that require tkinter
+# These are not needed for pytest test collection/execution
+try:
+    from tests.tests_tab import TestsTab
+    from tests.checklists_tab import ChecklistsTab, ChecklistWidget
+    _HAS_TKINTER = True
+except ImportError:
+    TestsTab = None
+    ChecklistsTab = None
+    ChecklistWidget = None
+    _HAS_TKINTER = False
 
 # Import individual test classes for direct access
 from tests.test_signal_chain import SignalChainTest
