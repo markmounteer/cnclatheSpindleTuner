@@ -1,3 +1,74 @@
+# Spindle Tuner v6.0 - Code Quality Improvements
+
+## Summary
+
+Three pull requests merged to improve code quality, type safety, and maintainability across the codebase.
+
+---
+
+## PR #1: Improve config.py Structure and Type Safety
+
+### Changes to config.py
+- Add comprehensive type hints with `Final`, `NamedTuple`, `Dict`, `List`, `Tuple`
+- Add `TuningParamSpec` NamedTuple for better parameter metadata
+- Add `external_ok` alias in `MONITOR_PINS` for tests.py compatibility
+- Maintain `safety_chain` for main.py/dashboard.py backward compatibility
+- Add computed constants: `UPDATE_HZ`, `HISTORY_SAMPLES`, `GUIDE_VERSION`
+- Split `APP_TITLE` into separate `APP_NAME` and `APP_VERSION` components
+- Add `__all__` for explicit public exports
+- Standardize on double quotes for string consistency
+- Replace Unicode characters with ASCII equivalents for portability
+
+### New Files
+- `.gitignore`: Added for Python bytecode (`__pycache__/`, `*.pyc`) and IDE files
+
+### Statistics
+| File | Changes |
+|------|---------|
+| config.py | +165 lines, -104 lines |
+| .gitignore | +18 lines (new) |
+
+---
+
+## PR #2: Improve export.py with Type Hints and Error Handling
+
+### Changes to export.py
+- Add comprehensive type hints throughout the module
+- Replace bare `except:` clauses with specific exception types
+- Add `ProfileData` TypedDict and `ParsedProfile` dataclass for better typing
+- Add profile name validation and filename sanitization
+- Add profile deletion capability with confirmation dialog
+- Add configurable `max_profiles` display limit
+- Add Delete key binding in profiles listbox
+- Add proper encoding specification (`utf-8`) to all file operations
+- Refactor duplicate profile parsing logic into `_parse_profile_file` helper
+- Add `_format_profile_display` helper to eliminate code duplication
+- Add `_get_selected_profile_path` helper for DRY principle
+- Replace print statements with proper logging
+- Add detailed docstrings with Args/Returns documentation
+- Rename `self.logger` to `self.data_logger` to avoid confusion with module logger
+- Add thousand separator to points count display
+
+### Statistics
+| File | Changes |
+|------|---------|
+| export.py | +508 lines, -211 lines |
+
+---
+
+## PR #3: Improve config.py Typing and Helpers
+
+### Additional Changes to config.py
+- Further improvements to type annotations
+- Added helper functions for configuration access
+
+### Statistics
+| File | Changes |
+|------|---------|
+| config.py | +72 lines, -5 lines |
+
+---
+
 # Spindle Tuner v6.0 - Round 17 Bug Fixes
 
 ## Summary
