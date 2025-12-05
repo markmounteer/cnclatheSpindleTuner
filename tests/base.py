@@ -42,6 +42,10 @@ class HalProtocol(Protocol):
 
     def send_mdi(self, command: str) -> None: ...
 
+    def get_param(self, param_name: str) -> float: ...
+
+    def set_param(self, param_name: str, value: float) -> bool: ...
+
 
 class DataLoggerProtocol(Protocol):
     """Protocol for data logging backends."""
