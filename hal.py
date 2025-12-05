@@ -239,8 +239,8 @@ class MockPhysicsEngine:
         total_slip = base_slip + load_slip + thermal_slip
 
         # === VFD DYNAMICS ===
-        vfd_delay = self.physics.vfd_delay_s
-        alpha = min(0.3, dt / (vfd_delay / 3))
+        vfd_delay = max(1e-6, self.physics.vfd_delay_s)
+        alpha = min(0.3, dt / (vfd_delay / 3.0))
 
         # VFD fault slows response
         if self.state.vfd_fault:
@@ -534,17 +534,21 @@ class HalInterface:
                     self._linuxcnc_stat.poll()
                     logger.info("Connected to LinuxCNC command interface")
                     connected_to_something = True
-                
-                # Try HAL component (for direct pin access)
+
+                # Note: we primarily interact via halcmd, so HAL component creation
+                # is optional. If the HAL module is present, treat that as a valid
+                # connection signal even if component creation fails (e.g., name
+                # collision). When creation succeeds, finalize with ready().
                 if HAS_HAL_MODULE:
+                    connected_to_something = True
                     try:
-                        self._hal_component = hal_module.component("spindle_tuner")
-                        logger.info("Created HAL component")
-                        connected_to_something = True
+                        component_name = f"spindle_tuner_{os.getpid()}"
+                        self._hal_component = hal_module.component(component_name)
+                        self._hal_component.ready()
+                        logger.info(f"Created HAL component {component_name}")
                     except Exception as e:
-                        # Component may already exist
                         logger.debug(f"HAL component creation failed (may already exist): {e}")
-                
+
                 # Only mark as connected if we actually connected to something
                 if connected_to_something:
                     self._state = ConnectionState.CONNECTED
@@ -684,7 +688,7 @@ class HalInterface:
         values: Dict[str, float] = {}
         targets = set(pin_names)
 
-        args = ['-s', 'show', 'pin', '-F', '%n %v', *targets]
+        args = ['-s', 'show', 'pin', *targets]
 
         try:
             result = self._run_halcmd(args, timeout=1.5)
@@ -700,17 +704,22 @@ class HalInterface:
             return values
 
         for line in result.stdout.splitlines():
-            parts = line.strip().split(maxsplit=1)
-            if len(parts) != 2:
+            tokens = line.strip().split()
+            if len(tokens) < 2:
                 continue
 
-            name, raw_value = parts
+            name = tokens[-1]
             if name not in targets:
                 continue
 
+            value_token_idx = -2
+            if tokens[-2] in {'<=>', '<==', '=>', '==>', '<='} and len(tokens) >= 3:
+                value_token_idx = -3
+
             try:
+                raw_value = tokens[value_token_idx]
                 values[name] = self._parse_hal_value(raw_value)
-            except ValueError as e:
+            except (IndexError, ValueError) as e:
                 logger.error(f"Invalid bulk value for {name}: {e}")
             except Exception as e:
                 logger.error(f"Error parsing bulk value for {name}: {e}")
@@ -754,7 +763,7 @@ class HalInterface:
                 val = bulk_values.get(pin)
                 if val is None:
                     # Fallback to individual read if missing from bulk output
-                    val = self.get_pin_value(pin)
+                    val = self.get_pin_value(pin, use_cache=False)
                 for key in keys:
                     values[key] = val
 
@@ -896,8 +905,18 @@ class HalInterface:
         
         if self.is_mock:
             for name, value in params.items():
-                if name in TUNING_PARAMS:
-                    self._mock_state.params[name] = value
+                if name not in TUNING_PARAMS:
+                    logger.warning(f"Unknown parameter in bulk set: {name}")
+                    continue
+
+                _, desc, min_val, max_val, step, _, _ = TUNING_PARAMS[name]
+                clamped_value = self._clamp_and_snap(value, min_val, max_val, step)
+                self._mock_state.params[name] = clamped_value
+                if clamped_value != value:
+                    logger.debug(
+                        f"[MOCK] Adjusted {name} from {value} -> {clamped_value}"
+                    )
+
             logger.debug(f"[MOCK] Bulk set {len(params)} params")
             return True
         
@@ -971,11 +990,11 @@ class HalInterface:
 
         try:
             self._linuxcnc_stat.poll()
-            
+
             # Switch to MDI mode if needed
             if self._linuxcnc_stat.task_mode != linuxcnc.MODE_MDI:
                 self._linuxcnc_cmd.mode(linuxcnc.MODE_MDI)
-                self._linuxcnc_cmd.wait_complete(timeout=2)
+                self._linuxcnc_cmd.wait_complete(2.0)
             
             self._linuxcnc_cmd.mdi(command)
             logger.info(f"Sent MDI: {command}")
@@ -1219,12 +1238,12 @@ class IniFileHandler:
                     continue
                 # Try to convert to number
                 try:
-                    if '.' in value:
-                        params[key] = float(value)
-                    else:
-                        params[key] = int(value)
+                    params[key] = int(value)
                 except ValueError:
-                    params[key] = value
+                    try:
+                        params[key] = float(value)
+                    except ValueError:
+                        params[key] = value
             
             return params
             
