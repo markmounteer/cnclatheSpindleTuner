@@ -214,7 +214,7 @@ class TestsTab:
             safety_frame.pack(fill=tk.X, padx=10, pady=5)
 
             for note in desc.safety_notes:
-                lbl = ttk.Label(safety_frame, text=f"  {note}",
+                lbl = ttk.Label(safety_frame, text=f"• {note}",
                                 foreground="red", wraplength=500)
                 lbl.pack(anchor="w")
 
@@ -245,33 +245,33 @@ class TestsTab:
             self._add_list_section(scrollable, "Troubleshooting", desc.troubleshooting)
 
     def _add_section(self, parent, title: str, content: str):
-        """Add a text section."""
+        """Add a text section preserving paragraphs and spacing."""
         frame = ttk.LabelFrame(parent, text=title, padding="10")
         frame.pack(fill=tk.X, padx=10, pady=5)
 
-        # Clean up content
-        lines = content.strip().split('\n')
-        clean_lines = [line.strip() for line in lines if line.strip()]
-        text = '\n'.join(clean_lines)
+        lines = content.splitlines()
+        clean_lines = [line.rstrip() for line in lines]
+        text = '\n'.join(clean_lines).strip()
 
         lbl = ttk.Label(frame, text=text, wraplength=500, justify=tk.LEFT)
         lbl.pack(anchor="w")
 
     def _add_list_section(self, parent, title: str, items: list):
-        """Add a bulleted list section."""
+        """Add a bulleted or numbered list section."""
         frame = ttk.LabelFrame(parent, text=title, padding="10")
         frame.pack(fill=tk.X, padx=10, pady=5)
 
-        for item in items:
-            # Handle indented items
-            if item.startswith("  "):
-                prefix = "    "
-            else:
-                prefix = ""
-
-            lbl = ttk.Label(frame, text=f"{prefix}{item}",
-                            wraplength=500, justify=tk.LEFT)
-            lbl.pack(anchor="w")
+        numbered_titles = ["Procedure", "Prerequisites", "Expected Results"]
+        if title in numbered_titles:
+            for i, item in enumerate(items, 1):
+                lbl = ttk.Label(frame, text=f"{i}. {item.strip()}",
+                                wraplength=500, justify=tk.LEFT)
+                lbl.pack(anchor="w")
+        else:
+            for item in items:
+                lbl = ttk.Label(frame, text=f"• {item.strip()}",
+                                wraplength=500, justify=tk.LEFT)
+                lbl.pack(anchor="w")
 
     def _add_step_controls(self, parent, test_key: str):
         """Add step test specific controls."""
@@ -386,18 +386,24 @@ class TestsTab:
             try:
                 step_from = int(self.step_from.get())
                 step_to = int(self.step_to.get())
+                if step_from < 0 or step_to < 0:
+                    raise ValueError("RPM values must be positive")
+                if step_from >= step_to:
+                    raise ValueError("To RPM must be greater than From RPM")
                 test.set_step_values(step_from, step_to)
-            except ValueError:
-                messagebox.showerror("Error", "Invalid step values")
+            except ValueError as exc:
+                messagebox.showerror("Error", str(exc))
                 return
 
         elif test_key == "steadystate":
             try:
                 duration = int(self.ss_duration.get())
+                if not 10 <= duration <= 300:
+                    raise ValueError("Duration must be between 10 and 300 seconds")
                 test.set_duration(duration)
-            except ValueError:
-                duration = 30
-                test.set_duration(duration)
+            except ValueError as exc:
+                messagebox.showerror("Error", str(exc))
+                return
 
         test.run()
 
@@ -523,6 +529,9 @@ class TestsTab:
         try:
             ext = filepath.lower().split('.')[-1]
             log_text = self.results_text.get(1.0, tk.END)
+            if not log_text.strip():
+                messagebox.showinfo("No Results", "No test results to export.")
+                return
 
             if ext == 'json':
                 data = {
@@ -593,7 +602,7 @@ class TestsTab:
         for param in ['P', 'I', 'FF0', 'FF1', 'Deadband', 'MaxErrorI', 'RateLimit']:
             try:
                 params[param] = self.hal.get_param(param)
-            except:
+            except Exception:
                 params[param] = None
         return params
 
