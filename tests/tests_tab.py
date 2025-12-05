@@ -85,20 +85,20 @@ class TestsTab:
         self.tests: Dict[str, object] = {}
 
         # UI elements
-        self.results_text = None
-        self.progress_bar = None
-        self.progress_label = None
-        self.lbl_revs = None
+        self.results_text: Optional[scrolledtext.ScrolledText] = None
+        self.progress_bar: Optional[ttk.Progressbar] = None
+        self.progress_label: Optional[ttk.Label] = None
+        self.lbl_revs: Optional[ttk.Label] = None
 
         # Step test parameters
-        self.step_from = None
-        self.step_to = None
-        self.ss_duration = None
+        self.step_from: Optional[ttk.Entry] = None
+        self.step_to: Optional[ttk.Entry] = None
+        self.ss_duration: Optional[ttk.Entry] = None
 
         # Mock controls
-        self.load_slider = None
-        self.load_label = None
-        self.mock_buttons = {}
+        self.load_slider: Optional[ttk.Scale] = None
+        self.load_label: Optional[ttk.Label] = None
+        self.mock_buttons: Dict[str, ttk.Button] = {}
 
         self._setup_ui()
         self._create_test_instances()
@@ -384,28 +384,35 @@ class TestsTab:
         # Handle test-specific parameters
         if test_key == "step":
             try:
+                if self.step_from is None or self.step_to is None:
+                    raise ValueError("Step test controls not initialized")
                 step_from = int(self.step_from.get())
                 step_to = int(self.step_to.get())
                 if step_from < 0 or step_to < 0:
                     raise ValueError("RPM values must be positive")
                 if step_from >= step_to:
                     raise ValueError("To RPM must be greater than From RPM")
-                test.set_step_values(step_from, step_to)
+                if hasattr(test, 'set_step_values'):
+                    test.set_step_values(step_from, step_to)
             except ValueError as exc:
                 messagebox.showerror("Error", str(exc))
                 return
 
         elif test_key == "steadystate":
             try:
+                if self.ss_duration is None:
+                    raise ValueError("Steady-state duration control not initialized")
                 duration = int(self.ss_duration.get())
                 if not 10 <= duration <= 300:
                     raise ValueError("Duration must be between 10 and 300 seconds")
-                test.set_duration(duration)
+                if hasattr(test, 'set_duration'):
+                    test.set_duration(duration)
             except ValueError as exc:
                 messagebox.showerror("Error", str(exc))
                 return
 
-        test.run()
+        if hasattr(test, 'run'):
+            test.run()
 
     # =========================================================================
     # UTILITY METHODS

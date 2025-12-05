@@ -44,12 +44,12 @@ class _TkUnavailable:
 # Conditionally import UI components that require tkinter
 try:
     from .tests_tab import TestsTab
-    from .checklists_tab import ChecklistsTab, ChecklistWidget
+    from .checklists_tab import ChecklistsTab, ChecklistGroup
     _HAS_TKINTER = True
 except ImportError:
-    TestsTab = _TkUnavailable
-    ChecklistsTab = _TkUnavailable
-    ChecklistWidget = _TkUnavailable
+    TestsTab = _TkUnavailable  # type: ignore[misc,assignment]
+    ChecklistsTab = _TkUnavailable  # type: ignore[misc,assignment]
+    ChecklistGroup = _TkUnavailable  # type: ignore[misc,assignment]
     _HAS_TKINTER = False
 
 # Import individual test classes for direct access using relative imports
@@ -72,7 +72,7 @@ __all__ = [
     # Main UI components
     'TestsTab',
     'ChecklistsTab',
-    'ChecklistWidget',
+    'ChecklistGroup',
 
     # Base classes
     'BaseTest',
