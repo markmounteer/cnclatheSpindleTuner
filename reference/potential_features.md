@@ -1,7 +1,7 @@
 # Potential Features Register
 **Directory:** /home/user/cnclatheSpindleTuner/reference/
-**Last Updated:** 2025-12-05 19:15 UTC
-**Total Entries:** 6 | **New:** 6 | **Under Review:** 0 | **Resolved:** 0
+**Last Updated:** 2025-12-05 22:15 UTC
+**Total Entries:** 5 | **New:** 5 | **Under Review:** 0 | **Resolved:** 0
 
 ## Summary Index
 | ID | Status | Priority | Source File | Title | Submitted |
@@ -10,7 +10,6 @@
 | FEAT-20251205-002 | New | Low | SPINDLE_PID_TUNING_GUIDE_v5.3.md | Add DPLL phase-error diagnostic net | 2025-12-05 |
 | FEAT-20251205-003 | New | Low | SPINDLE_PID_TUNING_GUIDE_v5.3.md | Document lowpass filter gain formula | 2025-12-05 |
 | FEAT-20251205-004 | New | Low | SPINDLE_PID_TUNING_GUIDE_v5.3.md | Document debounce delay units | 2025-12-05 |
-| FEAT-20251205-005 | New | Medium | SPINDLE_PID_TUNING_GUIDE_v5.3.md | Spindle safety hardening with E-stop gate | 2025-12-05 |
 | FEAT-20251205-006 | New | Low | SPINDLE_PID_TUNING_GUIDE_v5.3.md | Add at-speed relative tolerance with scale | 2025-12-05 |
 
 ---
@@ -142,41 +141,6 @@
 - If used, add brief explanation to relevant section
 - Low priority as guide focuses on spindle PID, not general HAL components
 - Could be added if guide is expanded to cover all HAL components
-
-**Review History:**
-- 2025-12-05 | External AI Agent | Submitted feature suggestion.
-- 2025-12-05 | Claude | Evaluated as feature suggestion; added to register.
-
----
-
-### FEAT-20251205-005 Spindle safety hardening with E-stop gate
-
-| Field | Value |
-|-------|-------|
-| Status | New |
-| Source File | SPINDLE_PID_TUNING_GUIDE_v5.3.md |
-| Location | Section 13 (Commissioning Cleanup) or Section 6 (Safety) |
-| Submitted By | External AI Agent (ChatGPT) |
-| Evaluated By | Claude (claude-opus-4-5-20251101) |
-| Submitted | 2025-12-05 |
-| Priority | Medium |
-| Duplicate Of | N/A |
-
-**Description:** Add safety hardening recommendations including:
-1. Gate spindle enable with the E-stop chain so VFD run signal cannot stay asserted if `external-ok` drops
-2. Consider resetting the speed filter when spindle is disabled to prevent stale filtered values
-
-**Context:** The guide covers E-stop testing in Section 6.3 and safety validation in Section 13.3, but does not explicitly recommend gating spindle enable with the E-stop chain in HAL.
-
-**Original Agent Rationale:** Agent suggests "Gate spindle enable with your estop chain, not just spindle.0.on, so the VFD run signal can't ever stay asserted if external-ok drops." Also suggests resetting speed filter on spindle disable.
-
-**Evaluator Assessment:** This is a reasonable safety enhancement. Gating spindle enable with external-ok adds defense-in-depth. The current guide assumes proper E-stop wiring but doesn't explicitly document this pattern. Medium priority as it relates to safety.
-
-**Implementation Considerations:**
-- Would add complexity to HAL configuration
-- Should verify current system behavior with E-stop
-- Could add to Section 13.3 Safety Validation as best practice
-- Filter reset suggestion needs careful consideration (could affect at-speed behavior)
 
 **Review History:**
 - 2025-12-05 | External AI Agent | Submitted feature suggestion.

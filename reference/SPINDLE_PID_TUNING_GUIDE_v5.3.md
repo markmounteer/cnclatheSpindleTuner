@@ -3,7 +3,7 @@
 **Version:** 5.3 — Enhanced with Motor Physics & Control Theory  
 **Hardware:** Baldor M3558T motor, XSY-AT1 VFD, ABILKEEN 1024 PPR encoder, Mesa 7i76E  
 **Control Topology:** Feedforward-Dominant with Integral Slip Compensation  
-**Last Updated:** December 2024
+**Last Updated:** December 2024 (Safety hardening added 2025-12-05)
 
 ---
 
@@ -1081,7 +1081,45 @@ setp drives-ok.in1 1
 - [ ] VFD fault triggers E-stop
 - [ ] Servo fault triggers E-stop
 
-### 13.4 Documentation & Backup
+### 13.4 Safety Hardening Recommendations
+
+**Gate Spindle Enable with E-stop Chain:**
+
+For defense-in-depth, gate the spindle enable signal with the E-stop chain so the VFD run signal cannot remain asserted if `external-ok` drops:
+
+```hal
+# Example: Gate spindle-on with external-ok
+# In custom.hal or main HAL file:
+loadrt and2 names=spindle-estop-gate
+addf spindle-estop-gate servo-thread
+
+net spindle-on-request spindle.0.on => spindle-estop-gate.in0
+net external-ok => spindle-estop-gate.in1
+net spindle-on-gated spindle-estop-gate.out => [VFD enable output]
+```
+
+This ensures:
+- VFD cannot receive run command if E-stop chain is broken
+- Provides redundancy beyond motion controller's internal checks
+- Protects against software faults that might leave spindle running
+
+**Speed Filter Reset (Optional):**
+
+Consider resetting the velocity lowpass filter when the spindle is disabled to prevent stale filtered values from affecting the next startup:
+
+```hal
+# Optional: Reset lowpass filter on spindle disable
+# Ensures clean velocity reading on next enable
+net spindle-on => lowpass.0.load  # Load input clears filter
+```
+
+This prevents the filter from holding old values that could:
+- Cause momentary at-speed false positives
+- Affect initial PID response on restart
+
+> **Note:** Test filter reset behavior carefully. Some configurations may prefer the filter to retain its last value for faster settling on restart.
+
+### 13.5 Documentation & Backup
 
 ```bash
 # Save tuned configuration
