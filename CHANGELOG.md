@@ -884,3 +884,43 @@ requiring documentation in the potential registers.
 - `python -m py_compile logger.py`
 
 # Spindle Tuner v6.0 - tests_pytest Review (2025-12-05)
+## 2025-12-06 — Feature Implementation
+
+**Implemented:** FEAT-20251205-008 — Implement Optional HAL Reconnection Attempts
+
+**Source File:** /home/user/cnclatheSpindleTuner/hal_interface.py
+
+**Description:**
+Added configurable halcmd verification retries before falling back to mock mode, improving resilience against transient HAL start-up issues while preserving the existing mock fallback behavior.
+
+**Changes Made:**
+- Added optional `connect_retries` and `retry_delay` parameters to `HalInterface` initialization to control reconnection policy.
+- Implemented a retry loop around halcmd verification with logging and configurable delay prior to entering mock fallback.
+- Tracked connect attempts across retries to keep diagnostics accurate.
+
+**Original Request:**
+- Submitted By: Code Review Agent
+- Submitted: 2025-12-05
+- Priority: 🟡 Medium
+- Register: /home/user/cnclatheSpindleTuner/potential_features.md
+
+**Implementation:**
+- Implemented By: GPT-5.1-Codex-Max
+- Implemented: 2025-12-06
+
+**Selection Rationale:**
+Evaluated 22 eligible features across 2 registers (root: 18, reference: 4). FEAT-20251205-008 ranked highest due to its higher impact on connection reliability with moderate effort and no dependencies.
+
+**Evaluation Score:**
+- Impact: 3/4
+- Effort: 2/3
+- Dependencies: 3/3
+- Clarity: 2/3
+- Total: 2.60
+
+**Competing Features:**
+- FEAT-20251205-004 — Score: 2.20 — Fallback Chart Error Trace Scaling Indicator
+- FEAT-20251205-005 — Score: 1.80 — Keyboard Shortcut Help Overlay
+
+---
+
