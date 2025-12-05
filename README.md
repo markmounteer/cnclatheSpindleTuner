@@ -318,6 +318,20 @@ spindle_tuner/
 
 ---
 
+## Testing
+
+Lightweight pytest-based checks live in `tests_pytest/` alongside the application-specific test classes in `tests/`.
+
+Run the fast validation suite locally with:
+
+```bash
+pytest
+```
+
+The tests exercise importability, configuration sanity (baseline/preset ranges, pin mapping uniqueness), and key HAL helper behaviors in mock mode.
+
+---
+
 ## Contributing
 
 Contributions and suggestions welcome. The modular architecture makes it easy to extend:
