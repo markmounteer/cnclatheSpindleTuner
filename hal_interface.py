@@ -325,7 +325,7 @@ class MockPhysicsEngine:
         polarity_mult = -1 if self.state.polarity_reversed else 1
         filtered_rpm = self.state.rpm_filtered
         signed_rpm = filtered_rpm * dir_mult * polarity_mult
-        abs_rpm = abs(filtered_rpm)
+        abs_rpm = abs(signed_rpm)
         encoder_scale = -4096 if self.state.polarity_reversed else 4096
         signed_cmd_raw = target * command_dir
         signed_cmd_limited = limited_cmd * command_dir
@@ -346,12 +346,13 @@ class MockPhysicsEngine:
         add_if_present('cmd_limited', signed_cmd_limited)
 
         # Feedback path (uses filtered RPM)
-        add_if_present('feedback', filtered_rpm * polarity_mult)
+        add_if_present('feedback', signed_rpm)
         add_if_present('feedback_raw', signed_rpm)
         add_if_present('feedback_abs', abs_rpm)
 
         # PID internals
-        add_if_present('error', limited_cmd - filtered_rpm)
+        signed_error = signed_cmd_limited - signed_rpm
+        add_if_present('error', signed_error)
         add_if_present('errorI', self.state.error_i)
         add_if_present('output', vfd_output)
 
