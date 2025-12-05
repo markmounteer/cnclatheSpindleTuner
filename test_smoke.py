@@ -1,10 +1,20 @@
-"""
-Smoke tests for CI - verifies basic imports work correctly.
+"""Smoke tests for CI - verifies basic imports work correctly.
 
-These are pytest-style unit tests that verify the application code
-can be imported without errors. The tests/ directory contains
-application-specific spindle tuner test classes (not pytest tests).
+These are pytest-style unit tests that verify the application code can be
+imported without errors. The ``tests/`` directory contains procedure suite
+classes (not pytest tests) and should not be collected directly by pytest.
 """
+
+from pathlib import Path
+import sys
+
+
+# Ensure the repository root is at the front of ``sys.path`` so imports resolve to
+# the in-repo modules rather than similarly named packages that might be
+# installed in the environment (for example, a third-party ``tests`` package).
+ROOT = Path(__file__).resolve().parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 class TestImports:
     """Verify core modules can be imported."""
@@ -17,10 +27,11 @@ class TestImports:
 
     def test_import_tests_base(self):
         """Tests base module should import without error."""
-        from tests.base import BaseTest, TestDescription, TARGETS
-        assert BaseTest is not None
-        assert TestDescription is not None
-        assert TARGETS is not None
+        from tests import base
+
+        assert base.BaseTest is not None
+        assert base.TestDescription is not None
+        assert base.TARGETS is not None
 
     def test_import_test_classes(self):
         """All spindle test classes should be importable."""
@@ -65,8 +76,9 @@ class TestImports:
 
     def test_import_logger(self):
         """Logger module should import without error."""
-        import logger
-        assert hasattr(logger, 'DataLogger')
+        import logger as spindle_logger
+
+        assert hasattr(spindle_logger, 'DataLogger')
 
     def test_import_hal(self):
         """HAL module should import without error."""
@@ -96,6 +108,7 @@ class TestConfiguration:
     def test_performance_targets(self):
         """Performance targets should be defined."""
         from tests.base import TARGETS
+
         assert TARGETS.settling_excellent > 0
         assert TARGETS.settling_good >= TARGETS.settling_excellent
         assert TARGETS.overshoot_excellent >= 0

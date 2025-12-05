@@ -398,8 +398,7 @@ class TroubleshooterTab:
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
-        return {'container': container, 'canvas': canvas, 'frame': frame,
-                'bind_mousewheel': _bind_to_mousewheel}
+        return {'container': container, 'canvas': canvas, 'frame': frame}
 
     # =========================================================================
     # LEFT PANE: AUDIT & WIZARD
@@ -596,7 +595,11 @@ class TroubleshooterTab:
         
         success = True
         for param, value in BASELINE_PARAMS.items():
-            if not self.hal.set_param(param, value):
+            try:
+                result = self.hal.set_param(param, value)
+                if result is False:
+                    success = False
+            except Exception:
                 success = False
         
         if success:
@@ -719,7 +722,11 @@ class TroubleshooterTab:
         if messagebox.askyesno("Apply Fix", msg):
             success = True
             for param, value in actions.items():
-                if not self.hal.set_param(param, value):
+                try:
+                    result = self.hal.set_param(param, value)
+                    if result is False:
+                        success = False
+                except Exception:
                     success = False
 
             if success:

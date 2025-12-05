@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 """
 Spindle Tuner - Dashboard Feature
 
@@ -28,7 +29,7 @@ from __future__ import annotations
 
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
-from typing import Dict, Callable, Optional
+from typing import Any, Dict, Callable, Optional, List
 from collections import deque
 from datetime import datetime
 import time
@@ -157,6 +158,14 @@ class DashboardTab:
         self.param_scales: Dict[str, ttk.Scale] = {}  # For lock/unlock control
         self.live_apply = tk.BooleanVar(value=True)
         self.params_locked = tk.BooleanVar(value=False)
+
+    @staticmethod
+    def _coerce_float(value: Any, default: float = 0.0) -> float:
+        """Safely convert a value to float for numeric widgets."""
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
         
         # Plot state
         self.show_traces: Dict[str, tk.BooleanVar] = {}
@@ -1004,7 +1013,7 @@ class DashboardTab:
     def read_from_hal(self):
         """Read current parameter values from HAL."""
         for param_name in self.param_vars:
-            value = self.hal.get_param(param_name)
+            value = self._coerce_float(self.hal.get_param(param_name))
             self.param_vars[param_name].set(value)
             if param_name in self.param_labels:
                 self.param_labels[param_name].config(text=f"{value:.2f}")
@@ -1121,11 +1130,11 @@ class DashboardTab:
         Called by main update loop.
         """
         # Update gauges
-        cmd = values.get('cmd_limited', 0)
-        fb = values.get('feedback', 0)
-        err = values.get('error', 0)
-        errI = values.get('errorI', 0)
-        output = values.get('output', 0)
+        cmd = self._coerce_float(values.get('cmd_limited'))
+        fb = self._coerce_float(values.get('feedback'))
+        err = self._coerce_float(values.get('error'))
+        errI = self._coerce_float(values.get('errorI'))
+        output = self._coerce_float(values.get('output'))
         
         self.lbl_cmd.config(text=f"{cmd:.0f}")
         self.lbl_feedback.config(text=f"{fb:.0f}")
@@ -1178,7 +1187,7 @@ class DashboardTab:
             self.lbl_hz.config(text="")
         
         # Revs counter (for threading operations)
-        revs = values.get('spindle_revs', 0)
+        revs = self._coerce_float(values.get('spindle_revs'))
         self.lbl_revs.config(text=f"{revs:.2f}")
         
         # Error color coding

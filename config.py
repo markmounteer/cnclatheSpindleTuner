@@ -30,7 +30,7 @@ UPDATE_INTERVAL_MS: Final[int] = 100  # 10Hz update rate
 UPDATE_HZ: Final[float] = 1000.0 / UPDATE_INTERVAL_MS
 
 HISTORY_DURATION_S: Final[int] = 120  # Data buffer duration (must cover max plot time scale)
-HISTORY_SAMPLES: Final[int] = int(HISTORY_DURATION_S * UPDATE_HZ)
+HISTORY_SAMPLES: Final[int] = round(HISTORY_DURATION_S * UPDATE_HZ)
 
 # File paths
 DEFAULT_CONFIG_DIR: Final[Path] = Path.home() / "linuxcnc" / "configs" / "Grizzly7x14_Lathe"
@@ -125,11 +125,13 @@ BASELINE_PARAMS: Dict[str, float] = {
 # Tuning presets
 PRESETS: PresetCollection = {
     "conservative": {
+        **BASELINE_PARAMS,
         "P": 0.05, "I": 0.8, "FF1": 0.30,
         "Deadband": 15.0, "MaxErrorI": 50.0, "RateLimit": 1000.0,
     },
     "baseline": BASELINE_PARAMS.copy(),
     "aggressive": {
+        **BASELINE_PARAMS,
         "P": 0.15, "I": 1.2, "FF1": 0.40,
         "Deadband": 8.0, "MaxErrorI": 80.0, "RateLimit": 1200.0,
     },
@@ -348,9 +350,15 @@ PLOT_DEFAULTS: Dict[str, bool] = {
 def get_monitor_pin(name: str, default: Optional[str] = None) -> str:
     """Return a HAL pin name for a monitor signal, optionally with a fallback."""
 
-    if default is None:
+    if default is not None:
+        return MONITOR_PINS.get(name, default)
+    try:
         return MONITOR_PINS[name]
-    return MONITOR_PINS.get(name, default)
+    except KeyError as exc:
+        known_keys = ", ".join(sorted(MONITOR_PINS)) or "<none>"
+        raise KeyError(
+            f"Unknown monitor pin key: {name!r}. Known keys: {known_keys}"
+        ) from exc
 
 
 def get_baseline_params() -> Dict[str, float]:
