@@ -13,5 +13,6 @@
 
 ## Entries
 
+*No rejected changes recorded.*
 *No rejected entries yet.*
 ---

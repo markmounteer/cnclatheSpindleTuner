@@ -1,3 +1,8 @@
+# Spindle Tuner v6.0 - test_smoke.py Review (2025-12-05)
+
+## Summary
+
+Reviewed `test_smoke.py` using the structured multi-pass process. Fixed one confirmed grammar issue. No uncertain errors or feature suggestions were identified; registers were reviewed for completeness.
 # Spindle Tuner v6.0 - logger.py Review (2025-02-14)
 
 ## Summary
@@ -9,6 +14,20 @@ requiring documentation in the potential registers.
 ---
 
 ## Corrections Applied
+
+### 1. Grammar agreement in module docstring
+
+- **Problem**: Opening sentence used a singular verb form with the plural subject "tests." 
+- **Fix**: Updated the sentence to use plural agreement.
+
+## Documentation Updated
+
+- `potential_errors.md` and `potential_features.md`: Reviewed with no new entries added for this file.
+- `rejected_changes.md`: Initialized the register for this directory with zero entries.
+
+## Verification
+
+- Not run (documentation and docstring update only).
 
 ### 1. Fixed undefined buffer clears in `clear_recording`
 
