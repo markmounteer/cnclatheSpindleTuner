@@ -114,7 +114,7 @@ class CachedValue:
         return (time.monotonic() - self.timestamp_mono) < ttl_seconds
 
 
-@dataclass 
+@dataclass
 class MockState:
     """Mock simulation state container."""
     # Spindle state
