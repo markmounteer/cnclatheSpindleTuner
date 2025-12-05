@@ -6,7 +6,13 @@ CRITICAL SAFETY TEST - Verifies reverse (M4) operation and ABS component.
 
 import time
 import threading
-from tkinter import messagebox
+
+try:
+    from tkinter import messagebox
+    _HAS_TKINTER = True
+except ImportError:
+    messagebox = None
+    _HAS_TKINTER = False
 
 from config import MONITOR_PINS
 from tests.base import BaseTest, TestDescription

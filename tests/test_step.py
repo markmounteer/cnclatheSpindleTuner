@@ -6,7 +6,13 @@ Measures step response characteristics: settling time, overshoot, error.
 
 import time
 import threading
-from tkinter import messagebox
+
+try:
+    from tkinter import messagebox
+    _HAS_TKINTER = True
+except ImportError:
+    messagebox = None
+    _HAS_TKINTER = False
 
 from config import MONITOR_PINS
 from tests.base import BaseTest, TestDescription, TARGETS
