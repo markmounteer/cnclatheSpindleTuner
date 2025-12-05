@@ -1395,19 +1395,32 @@ class DashboardTab:
         
         self.text_fallback.config(state=tk.NORMAL)
         self.text_fallback.delete('1.0', tk.END)
-        
-        text = f"""╔═══════════════════════════════════════╗
-║         SPINDLE TELEMETRY              ║
-╠═══════════════════════════════════════╣
-║  Command:    {values.get('cmd_limited', 0):>8.0f} RPM         ║
-║  Feedback:   {values.get('feedback', 0):>8.0f} RPM         ║
-║  Error:      {values.get('error', 0):>8.1f} RPM         ║
-║  Integrator: {values.get('errorI', 0):>8.1f}              ║
-║  PID Output: {values.get('output', 0):>8.1f}              ║
-║  Revs:       {values.get('spindle_revs', 0):>8.2f}              ║
-╠═══════════════════════════════════════╣
-║  Time: {time.strftime('%H:%M:%S')}                         ║
-╚═══════════════════════════════════════╝
-"""
-        self.text_fallback.insert(tk.END, text)
+
+        inner_width = 31
+        label_width = 12
+        value_width = 9
+        unit_width = 6
+
+        def metric_line(label: str, value: float, unit: str, formatter: str) -> str:
+            value_text = formatter.format(value)
+            value_text = value_text.rjust(value_width)
+            content = f"{label:<{label_width}}│ {value_text} {unit:<{unit_width}}"
+            return f"│ {content.ljust(inner_width)} │"
+
+        lines = [
+            "╭" + "─" * inner_width + "╮",
+            f"│ {'SPINDLE TELEMETRY':^{inner_width}} │",
+            "├" + "─" * (label_width + 1) + "┬" + "─" * (inner_width - label_width - 1) + "┤",
+            metric_line("Command", values.get('cmd_limited', 0), "RPM", "{:.0f}"),
+            metric_line("Feedback", values.get('feedback', 0), "RPM", "{:.0f}"),
+            metric_line("Error", values.get('error', 0), "RPM", "{:.1f}"),
+            metric_line("Integrator", values.get('errorI', 0), "", "{:.1f}"),
+            metric_line("PID Output", values.get('output', 0), "", "{:.1f}"),
+            metric_line("Revs", values.get('spindle_revs', 0), "rev", "{:.2f}"),
+            "├" + "─" * inner_width + "┤",
+            f"│ {'Time: ' + time.strftime('%H:%M:%S'):<{inner_width}} │",
+            "╰" + "─" * inner_width + "╯",
+        ]
+
+        self.text_fallback.insert(tk.END, "\n".join(lines))
         self.text_fallback.config(state=tk.DISABLED)
