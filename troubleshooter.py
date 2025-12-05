@@ -511,10 +511,6 @@ class TroubleshooterTab:
             self._show_status("Not connected to HAL")
             return
 
-        if self._resolve_hal_method(["set_param", "setp"]) is None:
-            self._show_status("HAL API does not provide set_param/setp")
-            return
-
         audit_results = []
         severity_map = {
             'red': 3,

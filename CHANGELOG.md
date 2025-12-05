@@ -450,6 +450,11 @@ All changes verified with `python3 -m py_compile`:
 2. ✓ **Minimal changes** - Only touched lines necessary for fixes
 3. ✓ **Consistency** - UI snapping matches HAL `_clamp_and_snap()` from Round 13
 4. ✓ **No new features** - Pure bug fixes, no scope creep
+# Spindle Tuner v6.0 - troubleshooter.py Review (2025-12-05)
+
+## Summary
+
+Reviewed `troubleshooter.py` with the structured multi-pass process. Resolved one confirmed logic error and refreshed the register files to the latest standardized format.
 # Spindle Tuner v6.0 - pytest.ini Review (2025-12-05)
 
 ## Summary
@@ -466,6 +471,24 @@ requiring documentation in the potential registers.
 ---
 
 ## Corrections Applied
+
+### 1. Removed Unnecessary Setter Requirement in Audit
+
+- **File**: `troubleshooter.py`
+- **Issue**: The audit routine refused to run unless HAL write methods (`set_param`/`setp`) were available, even though it only reads parameters.
+- **Fix**: Removed the setter precondition so audits can run on read-only HAL interfaces.
+
+---
+
+## Documentation Updated
+
+- `potential_errors.md`: Reformatted to the standardized register layout; counts unchanged.
+- `potential_features.md`: Reformatted to the standardized register layout; counts unchanged.
+- `rejected_changes.md`: Initialized with the current directory metadata.
+
+## Verification
+
+- Syntax check: `python -m compileall troubleshooter.py`
 
 - None (file already consistent).
 
