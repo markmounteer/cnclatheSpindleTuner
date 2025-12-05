@@ -5,7 +5,6 @@ Comprehensive verification before tuning session.
 """
 
 import time
-import threading
 
 from config import MONITOR_PINS, BASELINE_PARAMS
 from tests.base import BaseTest, TestDescription
@@ -73,7 +72,7 @@ system is properly configured and safe to operate.""",
         """Start pre-flight check in background thread."""
         if not self.start_test():
             return
-        threading.Thread(target=self._sequence, daemon=True).start()
+        self.run_sequence(self._sequence)
 
     def _sequence(self):
         """Execute pre-flight checks."""
@@ -135,17 +134,14 @@ system is properly configured and safe to operate.""",
         self.hal.send_mdi("M3 S200")
         time.sleep(3.0)
 
-        if self.test_abort:
-            self.hal.send_mdi("M5")
-            self.log_result("   ABORTED")
-            self.end_test()
+        if self.check_abort():
+            self.log_footer("ABORTED")
             return
 
         fb = self.hal.get_pin_value(MONITOR_PINS['feedback'])
         fb_abs = self.hal.get_pin_value(MONITOR_PINS['feedback_abs'])
         at_speed = self.hal.get_pin_value(MONITOR_PINS['at_speed'])
 
-        self.hal.send_mdi("M5")
         self.update_progress(90, "Analyzing results...")
 
         if fb > 100:
@@ -173,5 +169,3 @@ system is properly configured and safe to operate.""",
         else:
             self.log_footer("WARNING - ISSUES FOUND")
             self.log_result("Review warnings before proceeding.")
-
-        self.end_test()

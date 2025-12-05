@@ -5,7 +5,6 @@ Runs an abbreviated sequence of all major tests.
 """
 
 import time
-import threading
 
 try:
     from tkinter import messagebox
@@ -101,7 +100,7 @@ tuning configuration in about 2 minutes.""",
             self.end_test()
             return
 
-        threading.Thread(target=self._sequence, daemon=True).start()
+        self.run_sequence(self._sequence)
 
     def _sequence(self):
         """Execute full test suite."""

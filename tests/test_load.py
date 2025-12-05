@@ -5,7 +5,6 @@ Interactive test to measure load disturbance rejection.
 """
 
 import time
-import threading
 
 from config import MONITOR_PINS
 from tests.base import BaseTest, TestDescription, TARGETS
@@ -77,7 +76,7 @@ when prompted, then release to measure recovery.""",
         """Start load recovery test in background thread."""
         if not self.start_test():
             return
-        threading.Thread(target=self._sequence, daemon=True).start()
+        self.run_sequence(self._sequence)
 
     def _sequence(self):
         """Execute load recovery test."""

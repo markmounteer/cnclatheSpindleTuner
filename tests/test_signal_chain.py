@@ -4,7 +4,6 @@ Signal Chain Check Test (Guide §5.1)
 Verifies HAL signal chain integrity before tuning.
 """
 
-import threading
 from typing import Optional, Callable
 
 from config import MONITOR_PINS, BASELINE_PARAMS
@@ -68,7 +67,7 @@ and should be run before any other tests.""",
         """Start signal chain check in background thread."""
         if not self.start_test():
             return
-        threading.Thread(target=self._sequence, daemon=True).start()
+        self.run_sequence(self._sequence)
 
     def _sequence(self):
         """Execute signal chain check."""

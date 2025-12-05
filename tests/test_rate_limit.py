@@ -5,7 +5,6 @@ Verifies limit2 component enforces command rate limiting.
 """
 
 import time
-import threading
 
 from config import MONITOR_PINS
 from tests.base import BaseTest, TestDescription
@@ -70,7 +69,7 @@ during the VFD's ramp time, resulting in overshoot.""",
         """Start rate limit test in background thread."""
         if not self.start_test():
             return
-        threading.Thread(target=self._sequence, daemon=True).start()
+        self.run_sequence(self._sequence)
 
     def _sequence(self):
         """Execute rate limit test."""

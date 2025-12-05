@@ -5,7 +5,6 @@ Safe encoder watchdog simulation - MOCK MODE ONLY.
 """
 
 import time
-import threading
 
 try:
     from tkinter import messagebox
@@ -94,7 +93,7 @@ physical cable disconnection.""",
         if not self.start_test():
             return
 
-        threading.Thread(target=self._sequence, daemon=True).start()
+        self.run_sequence(self._sequence)
 
     def _sequence(self):
         """Execute safe mock watchdog test."""

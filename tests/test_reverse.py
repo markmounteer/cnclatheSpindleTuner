@@ -5,7 +5,6 @@ CRITICAL SAFETY TEST - Verifies reverse (M4) operation and ABS component.
 """
 
 import time
-import threading
 
 try:
     from tkinter import messagebox
@@ -100,7 +99,7 @@ negative feedback and increases output trying to go "faster".""",
             self.end_test()
             return
 
-        threading.Thread(target=self._sequence, daemon=True).start()
+        self.run_sequence(self._sequence)
 
     def _sequence(self):
         """Execute reverse safety test."""
