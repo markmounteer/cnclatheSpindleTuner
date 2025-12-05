@@ -36,7 +36,6 @@ import csv
 from config import (
     TUNING_PARAMS, BASELINE_PARAMS, PRESETS,
     PLOT_TRACES, PLOT_DEFAULTS, HISTORY_DURATION_S,
-    MONITOR_PINS
 )
 
 # Matplotlib imports
@@ -950,7 +949,11 @@ class DashboardTab:
     def _update_trace_visibility(self):
         """Update which traces are visible on plot."""
         for name, line in self.lines.items():
-            visible = self.show_traces.get(name, tk.BooleanVar(value=True)).get()
+            if name not in self.show_traces:
+                # Ensure dynamically created traces have a visibility variable
+                self.show_traces[name] = tk.BooleanVar(value=True)
+
+            visible = self.show_traces[name].get()
             line.set_visible(visible)
         # Full redraw needed to update legend/autoscale
         self.plot_dirty = True
@@ -1069,6 +1072,9 @@ class DashboardTab:
         # Use whatever samples we have instead of waiting for a minimum window
         errors = list(self.error_history)
 
+        if not errors:
+            return
+
         avg = sum(errors) / len(errors)
         min_err = min(errors)
         max_err = max(errors)
@@ -1178,6 +1184,8 @@ class DashboardTab:
         if hasattr(self.hal, 'rpm_to_hz'):
             hz = self.hal.rpm_to_hz(abs(cmd))
             self.lbl_hz.config(text=f"({hz:.1f}Hz)")
+        else:
+            self.lbl_hz.config(text="")
         
         # Revs counter (for threading operations)
         revs = values.get('spindle_revs', 0)
