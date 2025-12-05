@@ -155,6 +155,8 @@ class PhysicsParameters:
     thermal_time_constant_min: float = field(default_factory=lambda: MOTOR_SPECS['thermal_time_const_min'])
     rate_limit_rpm_s: float = field(default_factory=lambda: BASELINE_PARAMS['RateLimit'])
     filter_gain: float = 0.5
+    # Max RPM based on VFD max frequency for a 4-pole motor: (120 * max_freq) / 4
+    max_rpm: float = field(default_factory=lambda: (120.0 * VFD_SPECS['max_freq_hz']) / 4)
 
 
 # =============================================================================
@@ -293,7 +295,7 @@ class MockPhysicsEngine:
             current_rpm = 0.0
             noise = 0.0
         
-        current_rpm = max(0, min(2000, current_rpm))
+        current_rpm = max(0, min(self.physics.max_rpm, current_rpm))
         self.state.rpm = current_rpm
         
         # Low-pass filter on feedback (simulates actual filtering in HAL)
@@ -688,7 +690,7 @@ class HalInterface:
         now = time.monotonic()
         if (now - self._mock_last_update_mono) >= self._mock_update_interval:
             self._mock_values = self._physics_engine.update()
-            self._mock_last_update_mono = time.monotonic()
+            self._mock_last_update_mono = now
     
     @staticmethod
     def _parse_hal_value(text: str) -> float:
@@ -786,16 +788,21 @@ class HalInterface:
         # If a pin doesn't exist, halcmd prints an error to stderr and
         # may skip that output line. When this happens, we cannot reliably
         # map output lines to pins since we don't know which pin failed.
-        # Any unexpected stdout/stderr makes positional mapping unsafe, so
-        # fall back to individual reads.
-        if len(lines) != len(pin_list) or result.stderr.strip():
+        if len(lines) != len(pin_list):
+            # Line count mismatch - positional mapping is unsafe, fall back
+            # to individual reads
             logger.debug(
-                "Bulk read output mismatch or stderr present; falling back "
-                "to individual reads"
+                f"Bulk read output mismatch ({len(lines)} lines for "
+                f"{len(pin_list)} pins); falling back to individual reads"
             )
             for pin in pin_list:
                 values[pin] = self._read_hal_pin(pin)
             return values
+
+        # Log stderr if present (may contain warnings) but continue if
+        # line count matches - the values are likely still valid
+        if result.stderr.strip():
+            logger.debug(f"halcmd bulk read stderr (continuing): {result.stderr.strip()}")
 
         try:
             parsed_values = [self._parse_hal_value(line.strip()) for line in lines]
@@ -1178,13 +1185,19 @@ class HalInterface:
     @staticmethod
     def _parse_speed(command: str) -> float:
         """Parse speed value from M3/M4 command."""
+        if 'S' not in command:
+            return 1000.0  # Default speed
+
         try:
-            if 'S' in command:
-                s_val = command.split('S')[-1].split()[0]
-                return float(s_val)
+            # Extract everything after 'S' and take the first token
+            after_s = command.split('S')[-1].strip()
+            if not after_s:
+                return 1000.0  # No value after S
+            # Handle cases like "S1000" or "S 1000" or "S1000 F100"
+            s_val = after_s.split()[0]
+            return float(s_val)
         except (IndexError, ValueError):
-            pass
-        return 1000.0  # Default speed
+            return 1000.0  # Default speed on parse failure
     
     # -------------------------------------------------------------------------
     # Mock Mode Control
