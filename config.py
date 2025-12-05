@@ -13,7 +13,7 @@ Centralized configuration for:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Final, NamedTuple, Dict, List, Tuple, TypedDict
+from typing import Final, NamedTuple, Dict, List, Optional, Tuple, TypedDict
 
 
 # ==============================================================================
@@ -290,7 +290,7 @@ PLOT_DEFAULTS: Dict[str, bool] = {
 # HELPER FUNCTIONS
 # ==============================================================================
 
-def get_monitor_pin(name: str, default: str | None = None) -> str:
+def get_monitor_pin(name: str, default: Optional[str] = None) -> str:
     """Return a HAL pin name for a monitor signal, optionally with a fallback."""
 
     if default is None:

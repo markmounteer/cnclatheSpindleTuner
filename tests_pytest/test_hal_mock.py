@@ -1,6 +1,6 @@
 """Tests for mock-mode HAL parameter handling."""
 
-from hal import HalInterface
+from hal_interface import HalInterface
 
 
 def test_mock_bulk_set_clamps_and_validates():

@@ -70,9 +70,9 @@ class TestImports:
 
     def test_import_hal(self):
         """HAL module should import without error."""
-        import hal
-        assert hasattr(hal, 'HalInterface')
-        assert hasattr(hal, 'MockState')
+        import hal_interface
+        assert hasattr(hal_interface, 'HalInterface')
+        assert hasattr(hal_interface, 'MockState')
 
 
 class TestConfiguration:
