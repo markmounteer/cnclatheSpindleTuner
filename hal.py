@@ -144,15 +144,40 @@ class MockState:
 
 @dataclass
 class PhysicsParameters:
-    """Configurable physics simulation parameters."""
-    vfd_delay_s: float = field(default_factory=lambda: VFD_SPECS['transport_delay_s'])
-    max_noise_rpm: float = 3.0
-    low_speed_noise_rpm: float = 15.0
-    slip_cold_pct: float = field(default_factory=lambda: MOTOR_SPECS['cold_slip_pct'])
-    slip_hot_pct: float = field(default_factory=lambda: MOTOR_SPECS['hot_slip_pct'])
-    thermal_time_constant_min: float = field(default_factory=lambda: MOTOR_SPECS['thermal_time_const_min'])
-    rate_limit_rpm_s: float = field(default_factory=lambda: BASELINE_PARAMS['RateLimit'])
-    filter_gain: float = 0.5
+    """
+    Configurable physics simulation parameters.
+
+    These parameters model real motor/VFD physics and can be adjusted
+    to match specific hardware configurations.
+    """
+    # VFD timing
+    vfd_delay_s: float = field(default_factory=lambda: VFD_SPECS.get('transport_delay_s', 1.5))
+    max_alpha: float = 0.3  # Max response rate for VFD dynamics (limits dt/(vfd_delay/3))
+
+    # Encoder noise characteristics
+    max_noise_rpm: float = 3.0  # Base encoder noise standard deviation
+    low_speed_noise_rpm: float = 15.0  # Additional noise when DPLL disabled at low speed
+    dpll_noise_threshold_rpm: float = 200.0  # Speed below which DPLL noise is significant
+
+    # Motor slip factors (derived from motor datasheet)
+    slip_cold_pct: float = field(default_factory=lambda: MOTOR_SPECS.get('cold_slip_pct', 2.7))
+    slip_hot_pct: float = field(default_factory=lambda: MOTOR_SPECS.get('hot_slip_pct', 3.6))
+    load_slip_factor: float = 0.024  # Multiplier for load-dependent slip
+    thermal_slip_factor: float = 0.03  # Multiplier for thermal slip
+    thermal_time_constant_min: float = field(default_factory=lambda: MOTOR_SPECS.get('thermal_time_const_min', 20))
+
+    # Rate limiting
+    rate_limit_rpm_s: float = field(default_factory=lambda: BASELINE_PARAMS.get('RateLimit', 1200.0))
+    decel_multiplier: float = 1.5  # Decel can be faster than accel
+
+    # Speed limits
+    max_rpm: float = 2000.0  # Maximum simulated RPM (prevents runaway)
+
+    # Feedback filtering
+    filter_gain: float = 0.5  # Low-pass filter gain for encoder feedback
+
+    # At-speed detection
+    at_speed_deadband_factor: float = 2.0  # Multiplier for deadband in at-speed check
 
 
 # =============================================================================
@@ -201,6 +226,8 @@ class MockPhysicsEngine:
         if self.state.estop_triggered:
             target = 0.0
             self.state.cmd = 0.0
+            # Reset integrator on estop to prevent windup during fault
+            self.state.error_i = 0.0
         
         # === THERMAL TRACKING (exponential model) ===
         thermal_tau = self.physics.thermal_time_constant_min * 60  # seconds
@@ -223,64 +250,70 @@ class MockPhysicsEngine:
             limited_cmd = min(target, limited_cmd + max_change)
         elif target < limited_cmd:
             # Decel can be faster than accel
-            limited_cmd = max(target, limited_cmd - max_change * 1.5)
+            limited_cmd = max(target, limited_cmd - max_change * self.physics.decel_multiplier)
         
         self.state.limited_cmd = limited_cmd
         
         # === MOTOR SLIP CALCULATION ===
+        # These factors model real motor physics - slip varies with load and temperature
         base_slip = self.physics.slip_cold_pct / 100.0
-        load_slip = (self.state.load_pct / 100.0) * 0.024
-        thermal_slip = (self.state.thermal_factor - 1.0) * 0.03
+        load_slip = (self.state.load_pct / 100.0) * self.physics.load_slip_factor
+        thermal_slip = (self.state.thermal_factor - 1.0) * self.physics.thermal_slip_factor
         total_slip = base_slip + load_slip + thermal_slip
-        
+
         # === VFD DYNAMICS ===
         vfd_delay = self.physics.vfd_delay_s
-        alpha = min(0.3, dt / (vfd_delay / 3))
-        
+        alpha = min(self.physics.max_alpha, dt / (vfd_delay / 3))
+
         # VFD fault slows response
         if self.state.vfd_fault:
             alpha *= 0.1
-        
-        motor_target = limited_cmd * (1.0 - total_slip)
-        
+
         # === PID SIMULATION ===
+        # Use filtered feedback (what the real PID sees via encoder/DPLL)
+        # This matches real HAL behavior where PID uses filtered encoder feedback
         FF0 = params.get('FF0', 1.0)
         P = params.get('P', 0.1)
         I = params.get('I', 1.0)
         max_error_i = params.get('MaxErrorI', 60.0)
-        
-        vfd_base = limited_cmd * FF0
-        error = limited_cmd - current_rpm
+
+        # Error based on filtered feedback (not raw physical RPM)
+        error = limited_cmd - self.state.rpm_filtered
         p_term = P * error
-        
+
         self.state.error_i += error * dt * I
         self.state.error_i = max(-max_error_i, min(max_error_i, self.state.error_i))
-        
+
         pid_correction = p_term + self.state.error_i
-        
+
         # === FINAL MOTOR RESPONSE ===
-        final_target = motor_target + pid_correction
+        # Proper control loop: Command → PID (with FF0) → VFD/Motor (with slip) → RPM
+        # First compute PID output (feedforward + correction)
+        pid_output = limited_cmd * FF0 + pid_correction
+
+        # Then apply slip as a plant effect (slip happens in the motor AFTER VFD command)
+        motor_target = pid_output * (1.0 - total_slip)
         
         if self.state.vfd_fault:
             current_rpm = current_rpm * 0.95  # Rapid decel on fault
         else:
-            current_rpm = current_rpm * (1 - alpha) + final_target * alpha
+            current_rpm = current_rpm * (1 - alpha) + motor_target * alpha
         
         # === ENCODER SIMULATION WITH FILTERING ===
         base_noise = random.gauss(0, self.physics.max_noise_rpm / 3) if not self.state.encoder_fault else 0
         dpll_noise = 0.0
         
-        if self.state.dpll_disabled and current_rpm < 200:
+        if self.state.dpll_disabled and current_rpm < self.physics.dpll_noise_threshold_rpm:
             dpll_noise = random.gauss(0, self.physics.low_speed_noise_rpm)
-        
+
         noise = base_noise + dpll_noise
-        
+
         # Apply faults
         if self.state.encoder_fault:
             current_rpm = 0.0
             noise = 0.0
-        
-        current_rpm = max(0, min(2000, current_rpm))
+
+        current_rpm = max(0, min(self.physics.max_rpm, current_rpm))
         self.state.rpm = current_rpm
         
         # Low-pass filter on feedback (simulates actual filtering in HAL)
@@ -301,7 +334,7 @@ class MockPhysicsEngine:
         abs_rpm = abs(filtered_rpm)
         encoder_scale = -4096 if self.state.polarity_reversed else 4096
         
-        at_speed = abs(limited_cmd - filtered_rpm) < params.get('Deadband', 10) * 2
+        at_speed = abs(limited_cmd - filtered_rpm) < params.get('Deadband', 10) * self.physics.at_speed_deadband_factor
         external_ok = 0.0 if (self.state.encoder_fault or self.state.vfd_fault or 
                               self.state.estop_triggered) else 1.0
         
@@ -318,7 +351,7 @@ class MockPhysicsEngine:
             # PID internals
             'pid.s.error': limited_cmd - filtered_rpm,
             'pid.s.errorI': self.state.error_i,
-            'pid.s.output': vfd_base + pid_correction,
+            'pid.s.output': pid_output,
             
             # Status
             'spindle-is-at-speed': 1.0 if at_speed else 0.0,
@@ -1039,10 +1072,58 @@ class HalInterface:
     
     def reset_mock_state(self):
         """Reset mock state to defaults."""
-        self._mock_state = MockState()
-        if self._physics_engine:
-            self._physics_engine.state = self._mock_state
-    
+        with self._lock:
+            self._mock_state = MockState()
+            if self._physics_engine:
+                self._physics_engine.state = self._mock_state
+                self._physics_engine._last_update_mono = time.monotonic()
+            self._mock_values.clear()
+            logger.debug("[MOCK] State reset to defaults")
+
+    def reset_all_faults(self):
+        """
+        Clear all simulated faults.
+
+        This resets encoder_fault, vfd_fault, estop_triggered, polarity_reversed,
+        and dpll_disabled to their default (non-faulted) states.
+        """
+        with self._lock:
+            self._mock_state.encoder_fault = False
+            self._mock_state.vfd_fault = False
+            self._mock_state.estop_triggered = False
+            self._mock_state.polarity_reversed = False
+            self._mock_state.dpll_disabled = False
+            logger.debug("[MOCK] All faults cleared")
+
+    def get_faults(self) -> Dict[str, bool]:
+        """
+        Get current fault states.
+
+        Returns:
+            Dict mapping fault names to their enabled state
+        """
+        return {
+            'encoder': self._mock_state.encoder_fault,
+            'vfd': self._mock_state.vfd_fault,
+            'estop': self._mock_state.estop_triggered,
+            'polarity': self._mock_state.polarity_reversed,
+            'dpll': self._mock_state.dpll_disabled,
+        }
+
+    def has_active_fault(self) -> bool:
+        """
+        Check if any fault is currently active.
+
+        Returns:
+            True if any fault (encoder, vfd, estop) is active.
+            Note: polarity and dpll are configuration states, not faults.
+        """
+        return (
+            self._mock_state.encoder_fault or
+            self._mock_state.vfd_fault or
+            self._mock_state.estop_triggered
+        )
+
     # -------------------------------------------------------------------------
     # Utility Methods
     # -------------------------------------------------------------------------
