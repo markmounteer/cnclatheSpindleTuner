@@ -201,6 +201,9 @@ class MockPhysicsEngine:
         if self.state.estop_triggered:
             target = 0.0
             self.state.cmd = 0.0
+            # Force direction to stopped so downstream math (e.g., revolutions)
+            # doesn't continue accumulating with the previous sign.
+            self.state.direction = SpindleDirection.STOPPED
         
         # === THERMAL TRACKING (exponential model) ===
         thermal_tau = self.physics.thermal_time_constant_min * 60  # seconds
@@ -249,8 +252,11 @@ class MockPhysicsEngine:
         I = params.get('I', 1.0)
         max_error_i = params.get('MaxErrorI', 60.0)
         
+        # Apply feed-forward before PID so FF0 has a visible effect in the
+        # simulated response. Without this, the FF0 tuning parameter was unused
+        # and the mock behavior didn't match the real HAL control path.
         vfd_base = limited_cmd * FF0
-        error = limited_cmd - current_rpm
+        error = vfd_base - current_rpm
         p_term = P * error
         
         self.state.error_i += error * dt * I
