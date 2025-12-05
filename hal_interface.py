@@ -620,20 +620,21 @@ class HalInterface:
     
     def get_diagnostics(self) -> Dict[str, Any]:
         """Get connection diagnostics."""
-        return {
-            'state': self._state.name,
-            'is_mock': self.is_mock,
-            'platform': platform.system(),
-            'is_windows': IS_WINDOWS,
-            'is_linux': IS_LINUX,
-            'has_halcmd': HAS_HALCMD,
-            'has_hal_module': HAS_HAL_MODULE,
-            'has_linuxcnc': HAS_LINUXCNC,
-            'connect_attempts': self._connect_attempts,
-            'last_error': self._last_error,
-            'cache_size': len(self._cache),
-            'validated_pins': len(self._validated_pins),
-        }
+        with self._lock:
+            return {
+                'state': self._state.name,
+                'is_mock': self.is_mock,
+                'platform': platform.system(),
+                'is_windows': IS_WINDOWS,
+                'is_linux': IS_LINUX,
+                'has_halcmd': HAS_HALCMD,
+                'has_hal_module': HAS_HAL_MODULE,
+                'has_linuxcnc': HAS_LINUXCNC,
+                'connect_attempts': self._connect_attempts,
+                'last_error': self._last_error,
+                'cache_size': len(self._cache),
+                'validated_pins': len(self._validated_pins),
+            }
     
     # -------------------------------------------------------------------------
     # Pin Reading
@@ -785,28 +786,27 @@ class HalInterface:
         # If a pin doesn't exist, halcmd prints an error to stderr and
         # may skip that output line. When this happens, we cannot reliably
         # map output lines to pins since we don't know which pin failed.
-        # Fall back to individual reads for safety.
-        if len(lines) != len(pin_list):
+        # Any unexpected stdout/stderr makes positional mapping unsafe, so
+        # fall back to individual reads.
+        if len(lines) != len(pin_list) or result.stderr.strip():
             logger.debug(
-                f"Bulk read got {len(lines)} lines for {len(pin_list)} pins - "
-                f"falling back to individual reads to avoid misalignment"
+                "Bulk read output mismatch or stderr present; falling back "
+                "to individual reads"
             )
-            # Fall back to individual reads for ALL pins to avoid wrong mapping
             for pin in pin_list:
                 values[pin] = self._read_hal_pin(pin)
             return values
 
-        for idx, line in enumerate(lines):
-            pin = pin_list[idx]
-            try:
-                values[pin] = self._parse_hal_value(line.strip())
-            except ValueError as e:
-                logger.error(f"Invalid value for {pin} in bulk read: {e}")
-                # Fall back to individual read for this pin
+        try:
+            parsed_values = [self._parse_hal_value(line.strip()) for line in lines]
+        except Exception as e:
+            logger.error(f"Failed to parse bulk HAL output: {e}; falling back to individual reads")
+            for pin in pin_list:
                 values[pin] = self._read_hal_pin(pin)
-            except Exception as e:
-                logger.error(f"Error parsing bulk value for {pin}: {e}")
-                values[pin] = self._read_hal_pin(pin)
+            return values
+
+        for pin, parsed in zip(pin_list, parsed_values):
+            values[pin] = parsed
 
         if values:
             with self._lock:
@@ -940,7 +940,13 @@ class HalInterface:
         if param_name not in TUNING_PARAMS:
             logger.warning(f"Unknown parameter: {param_name}")
             return False
-        
+
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            logger.error(f"Invalid value type for {param_name}: {value}")
+            return False
+
         # Validate and snap to range/step
         min_val, max_val, step = self._get_param_bounds(param_name)
         original_value = value
@@ -1022,12 +1028,18 @@ class HalInterface:
                     if name not in TUNING_PARAMS:
                         continue
 
+                    try:
+                        numeric_value = float(value)
+                    except (TypeError, ValueError):
+                        logger.error(f"Invalid value type for {name}: {value}")
+                        continue
+
                     min_val, max_val, step = self._get_param_bounds(name)
-                    clamped_value = self._clamp_and_snap(value, min_val, max_val, step)
+                    clamped_value = self._clamp_and_snap(numeric_value, min_val, max_val, step)
                     self._mock_state.params[name] = clamped_value
-                    if clamped_value != value:
+                    if clamped_value != numeric_value:
                         logger.debug(
-                            f"[MOCK] Adjusted {name} from {value} -> {clamped_value}"
+                            f"[MOCK] Adjusted {name} from {numeric_value} -> {clamped_value}"
                         )
 
             valid_count = len(params) - len(unknown_params)
@@ -1044,6 +1056,12 @@ class HalInterface:
 
                 # Validate and clamp using the same rules as set_param
                 min_val, max_val, step = self._get_param_bounds(param_name)
+                try:
+                    value = float(value)
+                except (TypeError, ValueError):
+                    logger.error(f"Invalid value type for {param_name}: {value}")
+                    continue
+
                 value = self._clamp_and_snap(value, min_val, max_val, step)
 
                 meta = TUNING_PARAMS[param_name]
@@ -1234,19 +1252,21 @@ class HalInterface:
         """
         if self.is_mock:
             return True
-        
-        if pin_name in self._validated_pins:
-            return True
-        
+
+        with self._lock:
+            if pin_name in self._validated_pins:
+                return True
+
         try:
             # Use getp - it gives a clear success/failure signal
             # Unlike 'show pin', getp returns non-zero if pin doesn't exist
             result = self._run_halcmd(['-s', 'getp', pin_name], timeout=1.0)
             exists = result.returncode == 0
-            
+
             if exists:
-                self._validated_pins.add(pin_name)
-            
+                with self._lock:
+                    self._validated_pins.add(pin_name)
+
             return exists
             
         except Exception:
@@ -1517,10 +1537,15 @@ class IniFileHandler:
             where status is 'same', 'higher', or 'lower'
         """
         comparison = {}
-        
+
         for name, baseline in BASELINE_PARAMS.items():
-            current = params.get(name, baseline)
-            
+            raw_value = params.get(name, baseline)
+            try:
+                current = float(raw_value)
+            except (TypeError, ValueError):
+                logger.warning(f"Non-numeric value for {name} in baseline comparison: {raw_value}")
+                continue
+
             if abs(current - baseline) < 0.001:
                 status = 'same'
             elif current > baseline:
