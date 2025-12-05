@@ -102,6 +102,11 @@ class ProcedureDescription:
     safety_notes: List[str]
 
 
+# Backwards compatibility alias maintained for smoke tests and legacy callers
+# that referenced TestDescription before the rename to ProcedureDescription.
+TestDescription = ProcedureDescription
+
+
 # =============================================================================
 # BASE TEST CLASS
 # =============================================================================
