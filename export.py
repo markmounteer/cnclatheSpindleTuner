@@ -147,7 +147,7 @@ class ExportTab:
         self._setup_profiles_list()
 
     def _setup_recording_controls(self) -> None:
-        """Setup recording toggle, status indicator, and data controls."""
+        """Set up recording toggle, status indicator, and data controls."""
         frame = ttk.LabelFrame(self.parent, text="Recording", padding="10")
         frame.pack(fill=tk.X, padx=20, pady=10)
 
@@ -172,7 +172,7 @@ class ExportTab:
         self._sync_recording_ui()
 
     def _setup_export_options(self) -> None:
-        """Setup export buttons for CSV and INI generation."""
+        """Set up export buttons for CSV and INI generation."""
         frame = ttk.LabelFrame(self.parent, text="Export", padding="10")
         frame.pack(fill=tk.X, padx=20, pady=10)
 
@@ -184,7 +184,7 @@ class ExportTab:
         ).pack(side=tk.LEFT, padx=10)
 
     def _setup_profile_management(self) -> None:
-        """Setup profile save/load/delete buttons."""
+        """Set up profile save/load/delete buttons."""
         frame = ttk.LabelFrame(self.parent, text="Profiles", padding="10")
         frame.pack(fill=tk.X, padx=20, pady=10)
 
@@ -205,7 +205,7 @@ class ExportTab:
         ).pack(side=tk.RIGHT, padx=10)
 
     def _setup_profiles_list(self) -> None:
-        """Setup recent profiles listbox with double-click to load."""
+        """Set up recent profiles listbox with double-click to load."""
         frame = ttk.LabelFrame(self.parent, text="Recent Profiles", padding="10")
         frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
 

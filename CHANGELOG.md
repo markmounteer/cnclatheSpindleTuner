@@ -1,3 +1,24 @@
+# Spindle Tuner v6.0 - export.py Review (2025-12-05)
+
+## Summary
+
+Reviewed `export.py` using the structured multi-pass process. Corrected grammar in setup-related docstrings. No uncertain errors or new feature suggestions were identified; potential error and feature registers remain available for future review.
+
+---
+
+## Corrections Applied
+
+- Updated multiple docstrings to use the verb form "Set up" instead of the noun "Setup" for clearer grammar in function descriptions.
+
+## Documentation Updated
+
+- `rejected_changes.md`: Initialized register for the repository root with no entries recorded.
+
+## Verification
+
+- Not run (documentation and docstring updates only).
+
+
 # Spindle Tuner v6.0 - tests_pytest Review (2025-12-05)
 
 ## Summary
