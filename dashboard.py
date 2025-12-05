@@ -546,11 +546,12 @@ class DashboardTab:
         self.ax.set_xlim(0, self.time_scale.get())
         self.ax.set_ylim(-100, 2000)  # Initial range
         # Respect current grid toggle state when rebuilding axes
-        grid_enabled = getattr(self, 'plot_grid', tk.BooleanVar(value=True)).get()
+        grid_enabled = True if not hasattr(self, "plot_grid") else self.plot_grid.get()
         self.ax.grid(grid_enabled, alpha=0.3)
-        
+
         # Create lines with animated=True for blitting optimization
         self.lines = {}
+        animated = not self.dual_axis.get()
 
         if self.dual_axis.get():
             # Dual axis mode: RPM on left, error on right
@@ -564,16 +565,16 @@ class DashboardTab:
                     config = PLOT_TRACES[name]
                     line, = self.ax.plot([], [], color=config['color'],
                                         label=config['label'], linewidth=1.5,
-                                        animated=True)
+                                        animated=animated)
                     self.lines[name] = line
-            
+
             # Error traces on secondary axis
             for name in ['error', 'errorI']:
                 if name in PLOT_TRACES:
                     config = PLOT_TRACES[name]
                     line, = self.ax2.plot([], [], color=config['color'],
                                          label=config['label'], linewidth=1.5,
-                                         linestyle='--', animated=True)
+                                         linestyle='--', animated=animated)
                     self.lines[name] = line
         else:
             # Single axis mode
@@ -581,7 +582,7 @@ class DashboardTab:
             for name, config in PLOT_TRACES.items():
                 line, = self.ax.plot([], [], color=config['color'],
                                     label=config['label'], linewidth=1.5,
-                                    animated=True)
+                                    animated=animated)
                 self.lines[name] = line
 
         # Apply existing trace visibility preferences (e.g., after toggling dual axis)
@@ -732,6 +733,8 @@ class DashboardTab:
     
     def _edit_param_value(self, param_name: str):
         """Open dialog to edit parameter value with precision."""
+        if self.params_locked.get():
+            return
         current_val = self.param_vars[param_name].get()
         _, desc, min_val, max_val, _, _, _ = TUNING_PARAMS[param_name]
         
@@ -994,6 +997,8 @@ class DashboardTab:
 
     def _on_slider_change(self, param_name: str, value: str):
         """Handle slider change."""
+        if self.params_locked.get():
+            return
         try:
             val = self._snap_param(param_name, float(value))
             self.param_vars[param_name].set(val)
