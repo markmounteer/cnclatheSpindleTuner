@@ -578,6 +578,8 @@ class DashboardTab:
             cb = ttk.Checkbutton(trace_frame, text=label,
                                 variable=var, command=self._update_trace_visibility)
             cb.pack(side=tk.LEFT, padx=5)
+        # Initialize dynamic label to match default visible traces
+        self._update_plot_mode_label()
     
     def _setup_plot_axes(self):
         """Setup or reconfigure plot axes."""
@@ -1429,10 +1431,25 @@ class DashboardTab:
 
             visible = self.show_traces[name].get()
             line.set_visible(visible)
+        # Update the plot mode label to reflect visible traces
+        self._update_plot_mode_label()
         # Full redraw needed to update legend/autoscale
         self.plot_dirty = True
         if self.canvas:
             self.canvas.draw_idle()
+
+    def _update_plot_mode_label(self):
+        """Update plot mode label to show only visible trace names."""
+        visible_labels = []
+        for name, config in PLOT_TRACES.items():
+            if name in self.show_traces and self.show_traces[name].get():
+                visible_labels.append(config.get('label', name))
+        if visible_labels:
+            label_text = f"Plot: {', '.join(visible_labels)}"
+        else:
+            label_text = "Plot: (none)"
+        if hasattr(self, 'plot_mode_label') and self.plot_mode_label:
+            self.plot_mode_label.config(text=label_text)
     
     def _on_plot_draw(self, event):
         """Callback to capture static background for blitting optimization."""
