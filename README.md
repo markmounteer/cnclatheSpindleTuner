@@ -78,7 +78,7 @@ Decision tree based on Guide §14.4 with color-coded severity:
 
 | Requirement | Version | Notes |
 |-------------|---------|-------|
-| Python | 3.8+ | Standard library includes tkinter |
+| Python | 3.10+ | Standard library includes tkinter |
 | LinuxCNC | 2.8+ | For real HAL connection |
 | matplotlib | Optional | Required for real-time plotting |
 
@@ -99,7 +99,7 @@ Decision tree based on Guide §14.4 with color-coded severity:
 
 ```bash
 # Clone or copy to your LinuxCNC config directory
-cp -r spindle_tuner/ ~/linuxcnc/configs/Grizzly7x14_Lathe/
+cp -r cnclatheSpindleTuner/ ~/linuxcnc/configs/Grizzly7x14_Lathe/
 
 # Install optional dependencies
 pip install matplotlib
@@ -279,7 +279,7 @@ See the **Troubleshooter** tab for detailed decision trees.
 spindle_tuner/
 ├── main.py           # Application entry point, UI wiring, update loop
 ├── config.py         # Constants, HAL pins, baseline parameters, presets
-├── hal.py            # HAL interface, mock mode simulation, INI handling
+├── hal_interface.py  # HAL interface, mock mode simulation, INI handling
 ├── logger.py         # Data recording, metrics, CSV export
 ├── dashboard.py      # Dashboard tab: gauges, plot, parameter sliders
 ├── tests.py          # Tests tab: automated procedures, checklists tab
@@ -295,7 +295,7 @@ spindle_tuner/
 |--------|---------|
 | `main.py` | Application bootstrap, tab creation, update loop (10Hz), keyboard shortcuts |
 | `config.py` | All configuration: HAL pin mappings, tuning parameters, hardware specs, troubleshooting data |
-| `hal.py` | HAL communication abstraction, mock mode physics simulation, connection management |
+| `hal_interface.py` | HAL communication abstraction, mock mode physics simulation, connection management |
 | `logger.py` | Circular buffer data storage, metrics calculation, CSV export |
 | `dashboard.py` | Real-time visualization, parameter adjustment UI, status indicators |
 | `tests.py` | Automated test sequences, checklist UI, threading tools |

@@ -187,7 +187,7 @@ ENCODER_SPECS: EncoderSpecs = {
     "counts_per_rev": 4096,
     "differential": True,
     # Use a positive timer to match the HAL simulator defaults and avoid suggesting a
-    # reversed sign compared to the live pin value exposed in `hal.py`.
+    # reversed sign compared to the live pin value exposed in `hal_interface.py`.
     "dpll_timer_us": 100,
 }
 

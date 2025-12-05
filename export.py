@@ -82,7 +82,7 @@ class ExportTab:
         self,
         parent: ttk.Frame,
         data_logger: Any,  # DataLogger type from logger module
-        ini_handler: Any,  # IniFileHandler type from hal module
+        ini_handler: Any,  # IniFileHandler type from hal_interface module
         get_params_callback: Callable[[], Dict[str, float]],
         set_params_callback: Callable[[Dict[str, float]], None],
         max_profiles: int = MAX_PROFILES_DISPLAYED

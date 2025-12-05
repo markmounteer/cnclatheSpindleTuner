@@ -68,11 +68,11 @@ class TestImports:
         import logger
         assert hasattr(logger, 'DataLogger')
 
-    def test_import_hal(self):
-        """HAL module should import without error."""
-        import hal
-        assert hasattr(hal, 'HalInterface')
-        assert hasattr(hal, 'MockState')
+    def test_import_hal_interface(self):
+        """HAL interface module should import without error."""
+        import hal_interface
+        assert hasattr(hal_interface, 'HalInterface')
+        assert hasattr(hal_interface, 'MockState')
 
 
 class TestConfiguration:
