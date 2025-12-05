@@ -2,9 +2,17 @@
 Mock Watchdog Test (Guide §6.6)
 
 Safe encoder watchdog simulation - MOCK MODE ONLY.
+Validates that the software logic correctly handles a loss of encoder signal.
+
+Diagram placeholder:
++--------------------------+
+|   Encoder Signal Path    |
+| (Mock Fault Injection)   |
++--------------------------+
 """
 
 import time
+from typing import Optional
 
 try:
     from tkinter import messagebox
@@ -28,138 +36,154 @@ class WatchdogTest(BaseTest):
         return TestDescription(
             name="Encoder Watchdog Test (Mock)",
             guide_ref="§6.6",
-            purpose="""
-Safely test the encoder watchdog behavior using programmatic
-fault injection in MOCK MODE ONLY.
-
-On real hardware, the encoder watchdog should trigger an E-stop
-within ~1 second if the encoder signal is lost while the spindle
-is running. This prevents dangerous runaway conditions.
-
-This test safely simulates that behavior without requiring
-physical cable disconnection.""",
-
+            purpose=(
+                "Safely test the encoder watchdog behavior using programmatic "
+                "fault injection in MOCK MODE ONLY.\n\n"
+                "On real hardware (e.g., threading on a lathe), if the encoder signal "
+                "is lost while the spindle is turning, the carriage must stop immediately "
+                "to prevent crashing into the chuck. The watchdog timer triggers this "
+                "E-stop within ~1 second."
+            ),
             prerequisites=[
-                "Running in MOCK MODE",
-                "Real hardware testing should be done during",
-                "  initial commissioning with spindle stopped",
+                "System running in MOCK MODE (Strict)",
+                "No active E-stop conditions prior to start",
             ],
-
             procedure=[
-                "1. Click 'Run Test' (mock mode only)",
-                "2. Mock spindle starts at 1000 RPM",
-                "3. Encoder fault injected programmatically",
-                "4. System response observed",
-                "5. Fault cleared and spindle stopped",
+                "1. Verify Mock Mode (abort if real hardware)",
+                "2. Start mock spindle at 1000 RPM",
+                "3. Inject programmatic encoder fault (simulate cable break)",
+                "4. Monitor HAL signals for E-stop and Fault flags",
+                "5. Clear faults and reset system",
             ],
-
             expected_results=[
                 "Encoder fault flag becomes SET",
-                "Mock system responds to fault condition",
-                "On real hardware, this would trigger:",
-                "  - Watchdog timeout",
-                "  - External-OK signal drop",
-                "  - E-stop via safety chain",
+                "System triggers E-stop or Motion Inhibit",
+                "Spindle command drops to 0",
             ],
-
             troubleshooting=[
-                "Test only runs in mock mode:",
-                "  -> Start application with --mock flag",
-                "For real hardware testing:",
-                "  -> Verify during initial commissioning",
-                "  -> Test with spindle STOPPED",
-                "  -> Use oscilloscope to verify timing",
+                "Test Fails to Start: Restart application with --mock flag",
+                "No Fault Detected: Check `set_mock_fault` implementation in HAL mock",
             ],
-
             safety_notes=[
                 ">>> MOCK MODE ONLY <<<",
-                "Real watchdog testing requires different procedure",
-                "Never disconnect encoder while spindle running",
-                "Real test should verify <1 second response time",
+                "Do not rely on this test for physical safety validation.",
+                "Real hardware validation requires an oscilloscope and physical",
+                "disconnection of the encoder index pulse during a dry run.",
             ]
         )
 
-    def run(self):
+    def run(self) -> None:
         """Start mock watchdog test."""
-        if not self.hal.is_mock:
-            messagebox.showinfo(
-                "Mock Only",
-                "This test only runs in mock mode for safety.\n\n"
-                "On real hardware, encoder watchdog behavior should be\n"
-                "verified during initial commissioning with the spindle\n"
-                "stopped and proper safety procedures in place.")
+        # strict safety check
+        if not getattr(self.hal, 'is_mock', False):
+            self._show_safety_warning()
+            self.log_result("SKIPPED: Test attempted on real hardware.")
             return
 
         if not self.start_test():
             return
 
-        self.run_sequence(self._sequence)
+        # Wrap sequence in try/finally to ensure cleanup happens
+        try:
+            self.run_sequence(self._sequence)
+        except Exception as exc:  # pragma: no cover - user facing logging
+            self.log_result(f"CRITICAL ERROR: {exc}")
+        finally:
+            self._cleanup_system()
+            self.end_test()
 
-    def _sequence(self):
+    def _sequence(self) -> None:
         """Execute safe mock watchdog test."""
         self.log_header()
-        self.log_result("This is a SAFE simulation - no physical disconnection required.")
-        self.update_progress(0, "Starting mock spindle...")
+        self.log_result("SAFE SIMULATION: No physical disconnection required.")
 
-        # Start spindle in mock mode
+        # 1. Start Spindle
+        self.update_progress(10, "Starting mock spindle...")
         self.hal.send_mdi("M3 S1000")
-        self.log_result("\nStarting spindle at 1000 RPM...")
+        self.log_result("-> Commanded M3 S1000")
         time.sleep(2)
 
-        self.update_progress(20, "Reading baseline...")
-
+        # 2. Baseline
+        self.update_progress(30, "Reading baseline...")
         fb_before = self.hal.get_pin_value(MONITOR_PINS['feedback'])
-        self.log_result(f"Feedback before fault: {fb_before:.0f} RPM")
+        self.log_result(f"-> Baseline Feedback: {fb_before:.0f} RPM")
 
-        # Inject encoder fault programmatically
-        self.log_result("\nInjecting encoder fault via set_mock_fault()...")
-        self.update_progress(40, "Injecting fault...")
+        if fb_before < 100:
+            self.log_result("ERROR: Mock spindle did not spin up. Aborting.")
+            return
 
+        # 3. Fault Injection
+        self.log_result("\nInjecting encoder fault signal...")
+        self.update_progress(50, "Simulating broken cable...")
         self.hal.set_mock_fault('encoder', True)
-        time.sleep(1.5)
 
-        self.update_progress(60, "Checking response...")
+        # Wait for watchdog timeout (usually 1s + overhead)
+        time.sleep(2.0)
 
-        # Check response
+        # 4. Analysis
+        self.update_progress(70, "Analyzing system response...")
+
+        # Retrieve State
         fb_after = self.hal.get_pin_value(MONITOR_PINS['feedback'])
-        enc_fault = getattr(self.hal._mock_state, 'encoder_fault', False)
-        estop = getattr(self.hal._mock_state, 'estop_triggered', False)
 
-        self.log_result(f"\nFeedback after fault: {fb_after:.0f} RPM")
-        self.log_result(f"Encoder fault flag: {'SET' if enc_fault else 'CLEAR'}")
-        self.log_result(f"E-stop triggered: {'YES' if estop else 'NO'}")
+        # Access mock state safely with defaults
+        mock_state: Optional[object] = getattr(self.hal, '_mock_state', None)
+        enc_fault = getattr(mock_state, 'encoder_fault', False)
+        estop_active = getattr(mock_state, 'estop_triggered', False) or \
+            self.hal.get_pin_value('halui.estop.is-activated') is True
 
-        # Analysis
+        self.log_result(f"\nFeedback post-fault: {fb_after:.0f} RPM")
+        self.log_result(f"Encoder Fault Flag:  {'[SET]' if enc_fault else '[CLEAR]'}")
+        self.log_result(f"E-Stop State:        {'[TRIPPED]' if estop_active else '[OK]'}")
+
         self.log_result(f"\n{'='*50}")
         self.log_result("ANALYSIS:")
 
+        # Verification Logic
+        success = True
+
         if enc_fault:
-            self.log_result("  [OK] Encoder fault was detected")
+            self.log_result("  [PASS] Encoder fault flag detected.")
         else:
-            self.log_result("  [FAIL] Encoder fault not detected")
+            self.log_result("  [FAIL] System ignored the injected fault.")
+            success = False
 
-        if fb_after < fb_before * 0.5 or estop:
-            self.log_result("  [OK] Mock system responded to fault")
-            self.log_result("\nIn a real system, this would trigger:")
-            self.log_result("  - Watchdog timeout (encoder.00.watchdog)")
-            self.log_result("  - External-OK signal drop")
-            self.log_result("  - E-stop via safety chain")
+        if estop_active or fb_after < (fb_before * 0.1):
+            self.log_result("  [PASS] System correctly shut down (E-stop or Spin Down).")
         else:
-            self.log_result("  [INFO] Mock system continued running")
-            self.log_result("    (This tests the mock, not real watchdog)")
+            self.log_result("  [FAIL] Spindle continued running despite fault.")
+            success = False
 
-        # Clear fault and stop
-        self.log_result("\nClearing fault and stopping...")
-        self.update_progress(80, "Clearing fault...")
+        if success:
+            self.log_result("\nRESULT: Watchdog logic is functional in simulation.")
+        else:
+            self.log_result("\nRESULT: Watchdog logic FAILED.")
 
+    def _cleanup_system(self) -> None:
+        """Force system into a safe state."""
+        self.update_progress(90, "Cleaning up...")
+        self.log_result("\nResetting simulation state...")
+
+        # Clear mock fault
         self.hal.set_mock_fault('encoder', False)
+
+        # Stop spindle
         self.hal.send_mdi("M5")
+        time.sleep(0.5)
 
-        self.update_progress(100, "Complete")
+        self.update_progress(100, "Test Complete")
 
-        self.log_footer("MOCK TEST COMPLETE")
-        self.log_result("\nNote: Real watchdog testing should be done during")
-        self.log_result("commissioning with spindle OFF and oscilloscope/")
-        self.log_result("logic analyzer to verify timing.")
-
-        self.end_test()
+    def _show_safety_warning(self) -> None:
+        """Show blocking popup for safety."""
+        if _HAS_TKINTER and messagebox:
+            messagebox.showwarning(
+                "Mock Only",
+                "This test is restricted to MOCK MODE.\n\n"
+                "Testing watchdog on real hardware requires:\n"
+                "1. Spindle OFF\n"
+                "2. Oscilloscope verification\n"
+                "3. Controlled physical disconnection\n\n"
+                "Test Aborted."
+            )
+        else:
+            print("!!! SAFETY WARNING: Mock test aborted on real hardware !!!")
