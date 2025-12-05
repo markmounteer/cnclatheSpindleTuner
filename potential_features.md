@@ -1,7 +1,7 @@
 # Potential Features Register
 **Directory:** /home/user/cnclatheSpindleTuner/
-**Last Updated:** 2025-12-05 23:55 UTC
-**Total Entries:** 19 | **New:** 19 | **Under Review:** 0 | **Resolved:** 0
+**Last Updated:** 2025-12-06 00:30 UTC
+**Total Entries:** 18 | **New:** 18 | **Under Review:** 0 | **Resolved:** 0
 
 ## Summary Index
 | ID | Status | Priority | Source File | Title | Submitted |
@@ -9,7 +9,6 @@
 | FEAT-20251205-001 | 🆕 New | 🟢 Low | dashboard.py | Error History Export | 2025-12-05 |
 | FEAT-20251205-004 | 🆕 New | 🟢 Low | dashboard.py | Fallback Chart Error Trace Scaling Indicator | 2025-12-05 |
 | FEAT-20251205-005 | 🆕 New | 🟢 Low | dashboard.py | Keyboard Shortcut Help Overlay | 2025-12-05 |
-| FEAT-20251205-006 | 🆕 New | 🟢 Low | hal_interface.py | Add Type Annotations for Imported Configuration Constants | 2025-12-05 |
 | FEAT-20251205-007 | 🆕 New | 🟢 Low | hal_interface.py | Add `__all__` Export List | 2025-12-05 |
 | FEAT-20251205-008 | 🆕 New | 🟡 Medium | hal_interface.py | Implement Optional HAL Reconnection Attempts | 2025-12-05 |
 | FEAT-20251205-009 | 🆕 New | 🟡 Medium | config.py | Split into Config Package | 2025-12-05 |
@@ -116,34 +115,6 @@
 - Add a help dialog or tooltip listing shortcuts and actions.
 - Ensure the overlay is accessible without conflicting with existing shortcuts.
 - Keep the overlay optional to avoid clutter.
-
-**Review History:**
-- 2025-12-05 | System | Entry migrated to standardized register format.
-
----
-
-### FEAT-20251205-006 Add Type Annotations for Imported Configuration Constants
-
-| Field | Value |
-|-------|-------|
-| Status | 🆕 New |
-| Source File | hal_interface.py |
-| Location | Multiple references |
-| Submitted By | Code Review Agent |
-| Submitted | 2025-12-05 |
-| Priority | 🟢 Low |
-| Duplicate Of | N/A |
-
-**Description:** Add explicit type annotations for configuration constants imported from `config.py`.
-
-**Context:** Constants are used throughout the module without annotations, which can reduce type checker clarity.
-
-**Rationale:** Explicit types would aid static analysis and documentation.
-
-**Implementation Considerations:**
-- Import `Final` or explicit types for shared constants.
-- Ensure annotations stay synchronized with `config.py` definitions.
-- Keep runtime behavior unchanged.
 
 **Review History:**
 - 2025-12-05 | System | Entry migrated to standardized register format.

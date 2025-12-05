@@ -35,8 +35,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from config import (
+    # Configuration constants
     MONITOR_PINS, TUNING_PARAMS, BASELINE_PARAMS,
-    UPDATE_INTERVAL_MS, MOTOR_SPECS, VFD_SPECS
+    UPDATE_INTERVAL_MS, MOTOR_SPECS, VFD_SPECS,
+    # Type definitions for static analysis
+    TuningParamSpec, MotorSpecs, VfdSpecs,
 )
 
 # Configure module logger
