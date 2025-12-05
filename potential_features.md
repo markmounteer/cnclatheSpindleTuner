@@ -1,13 +1,12 @@
 # Potential Features Register
 **Directory:** /home/user/cnclatheSpindleTuner/
-**Last Updated:** 2025-12-06 00:50 UTC
-**Total Entries:** 17 | **New:** 17 | **Under Review:** 0 | **Resolved:** 0
+**Last Updated:** 2025-12-05 20:31 UTC
+**Total Entries:** 16 | **New:** 16 | **Under Review:** 0 | **Resolved:** 0
 
 ## Summary Index
 | ID | Status | Priority | Source File | Title | Submitted |
 |----|--------|----------|-------------|-------|-----------|
 | FEAT-20251205-001 | 🆕 New | 🟢 Low | dashboard.py | Error History Export | 2025-12-05 |
-| FEAT-20251205-004 | 🆕 New | 🟢 Low | dashboard.py | Fallback Chart Error Trace Scaling Indicator | 2025-12-05 |
 | FEAT-20251205-005 | 🆕 New | 🟢 Low | dashboard.py | Keyboard Shortcut Help Overlay | 2025-12-05 |
 | FEAT-20251205-007 | 🆕 New | 🟢 Low | hal_interface.py | Add `__all__` Export List | 2025-12-05 |
 | FEAT-20251205-009 | 🆕 New | 🟡 Medium | config.py | Split into Config Package | 2025-12-05 |
@@ -58,34 +57,6 @@
 - Add an export control to the statistics panel.
 - Choose formats such as CSV, JSON, or plain text.
 - Manage memory for large history buffers and consider limits on export size.
-
-**Review History:**
-- 2025-12-05 | System | Entry migrated to standardized register format.
-
----
-
-### FEAT-20251205-004 Fallback Chart Error Trace Scaling Indicator
-
-| Field | Value |
-|-------|-------|
-| Status | 🆕 New |
-| Source File | dashboard.py |
-| Location | Lines 1016–1020 |
-| Submitted By | Code Review Agent |
-| Submitted | 2025-12-05 |
-| Priority | 🟢 Low |
-| Duplicate Of | N/A |
-
-**Description:** Add a Y-axis indicator or legend note that the error trace is scaled in fallback mode.
-
-**Context:** The canvas fallback chart scales error by 5x and centers it for visibility without disclosing the scaling.
-
-**Rationale:** Users may misinterpret magnified error values without a visible scaling note.
-
-**Implementation Considerations:**
-- Add a small legend annotation rather than a full secondary axis.
-- Keep the canvas display simple for environments without matplotlib.
-- Ensure the indicator does not clutter the existing layout.
 
 **Review History:**
 - 2025-12-05 | System | Entry migrated to standardized register format.

@@ -1,3 +1,41 @@
+## 2025-12-05 — Feature Implementation
+
+**Implemented:** FEAT-20251205-004 — Fallback Chart Error Trace Scaling Indicator
+
+**Source File:** /home/user/cnclatheSpindleTuner/dashboard.py
+
+**Description:**
+Added an on-canvas legend note indicating that the fallback error trace is scaled by 5× and centered for visibility, preventing users from misinterpreting magnified error values when matplotlib is unavailable.
+
+**Changes Made:**
+- Added a legend label next to existing trace keys clarifying the error scaling and centering behavior for the fallback chart.
+
+**Original Request:**
+- Submitted By: Code Review Agent
+- Submitted: 2025-12-05
+- Priority: 🟢 Low
+- Register: /home/user/cnclatheSpindleTuner/potential_features.md
+
+**Implementation:**
+- Implemented By: GPT-5.1-Codex-Max
+- Implemented: 2025-12-05
+
+**Selection Rationale:**
+Evaluated 20 eligible features across 4 registers (root: 16, reference: 4, tests: 0, tests_pytest: 0). This feature achieved the highest weighted score (2.60) based on Impact (Medium), Effort (Minimal), Dependencies (None), and Clarity (Clear). Its direct user-facing clarity improvement and low implementation risk edged out other UX enhancements.
+
+**Evaluation Score:**
+- Impact: 2/4
+- Effort: 3/3
+- Dependencies: 3/3
+- Clarity: 3/3
+- Total: 2.60
+
+**Competing Features:**
+- FEAT-20251205-005 — Score: 2.20 — Keyboard Shortcut Help Overlay
+- FEAT-20251205-001 — Score: 2.00 — Error History Export
+
+---
+
 ## 2025-12-06 — Feature Implementation
 
 **Implemented:** FEAT-20251205-006 — Add Type Annotations for Imported Configuration Constants
