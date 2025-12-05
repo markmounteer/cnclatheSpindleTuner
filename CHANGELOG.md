@@ -1,3 +1,55 @@
+# Spindle Tuner v6.0 - dashboard.py Review (2025-12-05)
+
+## Summary
+
+Reviewed `dashboard.py` for errors. Applied **2 confirmed corrections** and documented uncertain issues and feature suggestions for review.
+
+---
+
+## Corrections Applied
+
+### 1. Formatting Inconsistency in Text Fallback (Line 921)
+
+**Problem**: The "Integrator:" label in the text fallback display was missing the space after the colon, unlike all other labels which include spacing for alignment.
+
+**Fix**:
+```python
+# Before
+f"Integrator:{errI:8.1f}\n"
+
+# After
+f"Integrator: {errI:8.1f}\n"
+```
+
+### 2. Undefined Variable Bug in Fallback Chart (Line 937)
+
+**Problem**: The `_update_text_fallback` method defined a local variable `err` but the code used `error` when appending to chart data. This would cause a `NameError` at runtime.
+
+**Fix**:
+```python
+# Before
+self.fallback_chart_data.append({
+    ...
+    'error': error,  # NameError: 'error' not defined
+    ...
+})
+
+# After
+self.fallback_chart_data.append({
+    ...
+    'error': err,  # Uses correct local variable
+    ...
+})
+```
+
+## Documentation Created
+
+- `potential_errors.md`: 2 uncertain issues documented for verification
+- `potential_features.md`: 5 enhancement suggestions documented for future consideration
+
+## Verification
+
+- Syntax check: `python3 -m py_compile dashboard.py` ✓
 # Spindle Tuner v6.0 - hal_interface.py Review
 
 ## Date: 2025-12-05

@@ -918,7 +918,7 @@ class DashboardTab:
             f"Cmd:       {cmd:8.0f} RPM\n"
             f"Feedback:  {fb:8.0f} RPM\n"
             f"Error:     {err:8.1f} RPM\n"
-            f"Integrator:{errI:8.1f}\n"
+            f"Integrator: {errI:8.1f}\n"
             f"PID Out:   {out:8.1f}\n"
             f"Revs:      {revs:8.2f}\n"
         )
@@ -934,7 +934,7 @@ class DashboardTab:
         self.fallback_chart_data.append({
             'cmd': cmd,
             'feedback': feedback,
-            'error': error,
+            'error': err,
             'time': time.time()
         })
 
