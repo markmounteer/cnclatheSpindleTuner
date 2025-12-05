@@ -495,7 +495,12 @@ class HalInterface:
     def is_mock(self) -> bool:
         """Check if running in mock mode."""
         return self._state == ConnectionState.MOCK or self._mock_fallback_active
-    
+
+    @property
+    def forced_mock(self) -> bool:
+        """Whether mock mode was explicitly forced at startup."""
+        return self._forced_mock
+
     @property
     def is_connected(self) -> bool:
         """Check if connected to HAL."""

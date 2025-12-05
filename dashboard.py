@@ -717,15 +717,24 @@ class DashboardTab:
         # Bind to parent's top-level window
         root = self.parent.winfo_toplevel()
         
-        root.bind('<space>', lambda e: self._stop_spindle())
-        root.bind('<F5>', lambda e: self._quick_step_test())
-        root.bind('<Escape>', lambda e: self._stop_spindle())
-        
+        root.bind('<space>', lambda e: self._handle_hotkey(self._stop_spindle), add="+")
+        root.bind('<F5>', lambda e: self._handle_hotkey(self._quick_step_test), add="+")
+        root.bind('<Escape>', lambda e: self._handle_hotkey(self._stop_spindle), add="+")
+
         # Number keys for speed presets
-        root.bind('1', lambda e: self._start_spindle(500))
-        root.bind('2', lambda e: self._start_spindle(1000))
-        root.bind('3', lambda e: self._start_spindle(1500))
-        root.bind('4', lambda e: self._start_spindle(1800))
+        root.bind('1', lambda e: self._handle_hotkey(lambda: self._start_spindle(500)), add="+")
+        root.bind('2', lambda e: self._handle_hotkey(lambda: self._start_spindle(1000)), add="+")
+        root.bind('3', lambda e: self._handle_hotkey(lambda: self._start_spindle(1500)), add="+")
+        root.bind('4', lambda e: self._handle_hotkey(lambda: self._start_spindle(1800)), add="+")
+
+    def _handle_hotkey(self, func):
+        """Run a hotkey handler unless focus is on a text entry."""
+        focused = self.parent.winfo_toplevel().focus_get()
+        if isinstance(focused, (tk.Entry, tk.Text, ttk.Entry)):
+            return "break"
+
+        func()
+        return "break"
     
     # =========================================================================
     # PARAMETER EDITING
