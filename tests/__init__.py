@@ -1,32 +1,17 @@
 """
 Spindle Tuner - Tests Module
 
-This package contains individual test modules for spindle PID tuning,
-organized according to the SPINDLE_PID_TUNING_GUIDE_v5.3.
+Individual test modules for spindle PID tuning, organized according to
+SPINDLE_PID_TUNING_GUIDE_v5.3.
 
 Test Categories:
-    1. Pre-Flight Tests (§5)
-       - Signal Chain Check (§5.1)
-       - Pre-Flight Check (§5, §14.3)
-       - Encoder Verification (§5.2, §12.2)
-
-    2. Startup Tests (§6)
-       - Open Loop Check (§6.1)
-       - Forward PID Test (§6.2)
-       - Reverse PID Test (§6.3)
-       - Rate Limit Test (§6.4)
-
-    3. Performance Tests (§7)
-       - Step Response (§7.1)
-       - Load Recovery (§7.2)
-       - Steady-State (§7.3)
-
-    4. Advanced Tests
-       - Deceleration Test
-       - Full Ramp Test
-       - Full Test Suite
-       - Watchdog Test (Mock)
+  1) Pre-Flight Tests (§5)
+  2) Startup Tests (§6)
+  3) Performance Tests (§7)
+  4) Advanced Tests
 """
+
+from __future__ import annotations
 
 from .base import BaseTest, PerformanceTargets, TARGETS, ProcedureDescription, TestDescription
 
@@ -36,8 +21,8 @@ class _TkUnavailable:
 
     def __init__(self, *_, **__):
         raise ImportError(
-            "Tkinter UI components are unavailable in this environment; "
-            "install tkinter to use TestsTab or checklist widgets."
+            "Tkinter UI components are unavailable in this environment. "
+            "Install/enable tkinter to use TestsTab or checklist widgets."
         )
 
 
@@ -45,14 +30,15 @@ class _TkUnavailable:
 try:
     from .tests_tab import TestsTab
     from .checklists_tab import ChecklistsTab, ChecklistGroup
-    _HAS_TKINTER = True
+
+    HAS_TKINTER = True
 except ImportError:
     TestsTab = _TkUnavailable  # type: ignore[misc,assignment]
     ChecklistsTab = _TkUnavailable  # type: ignore[misc,assignment]
     ChecklistGroup = _TkUnavailable  # type: ignore[misc,assignment]
-    _HAS_TKINTER = False
+    HAS_TKINTER = False
 
-# Import individual test classes for direct access using relative imports
+# Import individual test classes for direct access
 from .test_signal_chain import SignalChainTest
 from .test_preflight import PreflightTest
 from .test_encoder import EncoderTest
@@ -69,31 +55,31 @@ from .test_full_suite import FullSuiteTest
 from .test_watchdog import WatchdogTest
 
 __all__ = [
+    # Feature flags
+    "HAS_TKINTER",
     # Main UI components
-    'TestsTab',
-    'ChecklistsTab',
-    'ChecklistGroup',
-
+    "TestsTab",
+    "ChecklistsTab",
+    "ChecklistGroup",
     # Base classes
-    'BaseTest',
-    'PerformanceTargets',
-    'TARGETS',
-    'ProcedureDescription',
-    'TestDescription',
-
+    "BaseTest",
+    "PerformanceTargets",
+    "TARGETS",
+    "ProcedureDescription",
+    "TestDescription",
     # Individual test classes
-    'SignalChainTest',
-    'PreflightTest',
-    'EncoderTest',
-    'OpenLoopTest',
-    'ForwardTest',
-    'ReverseTest',
-    'RateLimitTest',
-    'StepTest',
-    'LoadTest',
-    'SteadyStateTest',
-    'DecelTest',
-    'RampTest',
-    'FullSuiteTest',
-    'WatchdogTest',
+    "SignalChainTest",
+    "PreflightTest",
+    "EncoderTest",
+    "OpenLoopTest",
+    "ForwardTest",
+    "ReverseTest",
+    "RateLimitTest",
+    "StepTest",
+    "LoadTest",
+    "SteadyStateTest",
+    "DecelTest",
+    "RampTest",
+    "FullSuiteTest",
+    "WatchdogTest",
 ]
