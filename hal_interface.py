@@ -298,15 +298,17 @@ class MockPhysicsEngine:
         
         # Low-pass filter on feedback (simulates actual filtering in HAL)
         # Use params (user-adjustable) with physics default as fallback
-        # Clamp to valid range [0.0, 1.0] to prevent filter instability
+        # Clamp to valid range [0.1, 1.0] to prevent filter freezing (0 = no update)
         filter_gain = params.get('FilterGain', self.physics.filter_gain)
-        filter_gain = max(0.0, min(1.0, filter_gain))
+        filter_gain = max(0.1, min(1.0, filter_gain))
         self.state.rpm_filtered = (self.state.rpm_filtered * (1 - filter_gain) +
                                    (current_rpm + noise) * filter_gain)
         
         # === REVOLUTIONS TRACKING ===
         rps = current_rpm / 60.0
+        # dir_mult: 0 when stopped (no revolution accumulation), else direction sign
         dir_mult = self.state.direction.value if self.state.direction != SpindleDirection.STOPPED else 0
+        # command_dir: defaults to 1 (forward) when stopped for signed command display
         command_dir = self.state.direction.value if self.state.direction != SpindleDirection.STOPPED else 1
         self.state.revolutions += rps * dt * dir_mult
         
@@ -774,8 +776,8 @@ class HalInterface:
                 logger.error(f"Error parsing bulk value for {pin}: {e}")
 
         if values:
-            now = time.monotonic()
             with self._lock:
+                now = time.monotonic()  # Capture inside lock for consistency
                 for pin, val in values.items():
                     self._cache[pin] = CachedValue(val, now)
 
@@ -1001,7 +1003,7 @@ class HalInterface:
                 input=cmd_str,
                 capture_output=True,
                 text=True,
-                timeout=3
+                timeout=3.0
             )
 
             if result.returncode == 0:
