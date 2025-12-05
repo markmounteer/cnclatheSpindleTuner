@@ -1,6 +1,6 @@
 # Potential Errors Register
-**Directory:** /workspace/cnclatheSpindleTuner/
-**Last Updated:** 2025-12-05 18:13 UTC
+**Directory:** /home/user/cnclatheSpindleTuner/
+**Last Updated:** 2025-12-05 20:30 UTC
 **Total Entries:** 4 | **New:** 4 | **Under Review:** 0 | **Resolved:** 0
 
 ## Summary Index
