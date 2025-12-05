@@ -372,9 +372,12 @@ class SpindleTunerApp:
     
     def _new_session(self):
         """Start a new tuning session - clears all recorded data."""
-        if messagebox.askyesno("New Session",
-                               "Clear all recorded data and start fresh?\n\n"
-                               "This will reset the data logger and plot."):
+        prompt = (
+            "Clear all recorded data and start fresh?\n\n"
+            "This will reset the data logger and plot."
+        )
+
+        if messagebox.askyesno("New Session", prompt):
             self.logger.clear_buffers()
             self.logger.clear_recording()
             logger.info("New session started - data cleared")
@@ -382,13 +385,14 @@ class SpindleTunerApp:
     def _on_closing(self):
         """Handle application closure with safety check."""
         if self.current_values.get('spindle_on', 0) > 0.5:
-            result = messagebox.askyesnocancel(
-                "Spindle Running",
+            prompt = (
                 "The spindle is currently running.\n\n"
                 "Yes = Stop spindle and exit\n"
                 "No = Exit without stopping\n"
                 "Cancel = Don't exit"
             )
+
+            result = messagebox.askyesnocancel("Spindle Running", prompt)
             if result is None:  # Cancel
                 return
             elif result:  # Yes - stop spindle first
