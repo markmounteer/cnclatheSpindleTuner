@@ -437,17 +437,15 @@ class TroubleshooterTab:
                 val = 0.0  # Default to 0 if parameter not found
             msg, color = self._audit_param(param, val)
 
-            severity = 0
-            if color == 'red':
-                severity = 3
-            elif color == 'orange':
-                severity = 2
-            elif color == 'yellow':
-                severity = 1
-            elif color == 'green':
-                severity = 0
-            else:
-                severity = -1
+            severity_map = {
+                'red': 3,
+                'orange': 2,
+                'yellow': 1,
+                'green': 0,
+                'gray': 0,
+            }
+
+            severity = severity_map.get(color, -1)
 
             audit_results.append({
                 'param': param,
@@ -471,7 +469,7 @@ class TroubleshooterTab:
             lbl_cur.config(text=f"{res['val']:.3f}")
             lbl_stat.config(text=res['msg'], foreground=res['color'])
 
-            if res['severity'] > 0:
+            if res['color'] != 'green':
                 warnings += 1
 
         if warnings == 0:
