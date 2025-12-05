@@ -539,17 +539,10 @@ class HalInterface:
 
                 # Note: we primarily interact via halcmd, so HAL component creation
                 # is optional. If the HAL module is present, treat that as a valid
-                # connection signal even if component creation fails (e.g., name
-                # collision). When creation succeeds, finalize with ready().
+                # connection signal but avoid creating an unused component.
                 if HAS_HAL_MODULE:
                     connected_to_something = True
-                    try:
-                        component_name = f"spindle_tuner_{os.getpid()}"
-                        self._hal_component = hal_module.component(component_name)
-                        self._hal_component.ready()
-                        logger.info(f"Created HAL component {component_name}")
-                    except Exception as e:
-                        logger.debug(f"HAL component creation failed (may already exist): {e}")
+                    logger.info("HAL module available; using halcmd for IO without component creation")
 
                 # Only mark as connected if we actually connected to something
                 if connected_to_something:
@@ -688,14 +681,20 @@ class HalInterface:
             return {}
 
         values: Dict[str, float] = {}
-        targets = set(pin_names)
 
-        # Use 'halcmd -s show pin <pin1> <pin2> ...' to fetch multiple pins
-        # Output format: "size type dir value name" (5 columns, name is last)
-        args = ['-s', 'show', 'pin', *targets]
+        pin_list = list(dict.fromkeys(pin_names))
+        commands = [f"getp {pin}" for pin in pin_list]
+        cmd_str = "\n".join(commands)
 
         try:
-            result = self._run_halcmd(args, timeout=1.5)
+            timeout = max(1.5, len(pin_list) * 0.1)
+            result = subprocess.run(
+                [self._halcmd_path],
+                input=cmd_str,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
         except subprocess.TimeoutExpired:
             logger.error("Timeout reading HAL pins (bulk)")
             return values
@@ -707,31 +706,22 @@ class HalInterface:
             logger.warning(f"halcmd bulk read failed: {result.stderr}")
             return values
 
-        # Parse halcmd output: "size type dir value name"
-        # Example: "     4 float IN      0 pid.s.feedback"
-        for line in result.stdout.splitlines():
-            parts = line.split()
-            if len(parts) < 5:
-                continue
+        lines = result.stdout.splitlines()
 
-            # Name is last column, value is second-to-last
-            name = parts[-1]
-            raw_value = parts[-2]
+        if len(lines) != len(pin_list):
+            logger.warning(
+                "Mismatch in bulk read output lines (expected %d, got %d)",
+                len(pin_list), len(lines)
+            )
+            return values
 
-            if name not in targets:
-                continue
-
-            value_token_idx = -2
-            if parts[-2] in {'<=>', '<==', '=>', '==>', '<='} and len(parts) >= 3:
-                value_token_idx = -3
-
+        for idx, pin in enumerate(pin_list):
             try:
-                raw_value = parts[value_token_idx]
-                values[name] = self._parse_hal_value(raw_value)
-            except (IndexError, ValueError) as e:
-                logger.error(f"Invalid bulk value for {name}: {e}")
+                values[pin] = self._parse_hal_value(lines[idx])
+            except ValueError as e:
+                logger.error(f"Invalid value for {pin} in bulk read: {e}")
             except Exception as e:
-                logger.error(f"Error parsing bulk value for {name}: {e}")
+                logger.error(f"Error parsing bulk value for {pin}: {e}")
 
         if values:
             now = time.monotonic()
