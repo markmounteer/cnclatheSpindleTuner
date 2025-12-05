@@ -527,7 +527,9 @@ class DashboardTab:
         self.ax.set_ylabel("RPM")
         self.ax.set_xlim(0, self.time_scale.get())
         self.ax.set_ylim(-100, 2000)  # Initial range
-        self.ax.grid(True, alpha=0.3)
+        # Respect current grid toggle state when rebuilding axes
+        grid_enabled = getattr(self, 'plot_grid', tk.BooleanVar(value=True)).get()
+        self.ax.grid(grid_enabled, alpha=0.3)
         
         # Create lines with animated=True for blitting optimization
         self.lines = {}
@@ -571,6 +573,13 @@ class DashboardTab:
                 self.lines[name] = line
             
             self.ax.legend(loc='upper right', fontsize=8, framealpha=0.5)
+
+        # Apply existing trace visibility preferences (e.g., after toggling dual axis)
+        for name, line in self.lines.items():
+            visible_var = self.show_traces.get(name)
+            if isinstance(visible_var, tk.BooleanVar):
+                line.set_visible(visible_var.get())
+
         
         if self.canvas:
             self.canvas.draw()
