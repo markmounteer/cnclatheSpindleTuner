@@ -9,7 +9,7 @@ import time
 import statistics
 
 from config import MONITOR_PINS
-from tests.base import BaseTest, TestDescription
+from tests.base import BaseTest, ProcedureDescription
 
 
 class ForwardTest(BaseTest):
@@ -26,8 +26,8 @@ class ForwardTest(BaseTest):
     MAX_JITTER = 15.0        # Max allowed standard deviation
 
     @classmethod
-    def get_description(cls) -> TestDescription:
-        return TestDescription(
+    def get_description(cls) -> ProcedureDescription:
+        return ProcedureDescription(
             name="Forward PID Test",
             guide_ref="§6.2",
             purpose="""
@@ -128,10 +128,8 @@ It calculates Standard Deviation to detect PID oscillation.""",
         # Use stdev if >1 sample, else 0
         fb_stdev = statistics.stdev(fb_samples) if len(fb_samples) > 1 else 0
         
-        err_avg = statistics.mean(err_samples) if err_samples else 0
-
         # 6. Reporting
-        self.log_result(f"\n--- Analysis ---")
+        self.log_result("\n--- Analysis ---")
         self.log_result(f"Target: {self.TARGET_RPM} RPM")
         self.log_result(f"Actual Average: {fb_avg:.1f} RPM")
         self.log_result(f"Range: {fb_min:.0f} to {fb_max:.0f} RPM")
@@ -147,7 +145,7 @@ It calculates Standard Deviation to detect PID oscillation.""",
             issues.append(f"Accuracy Fail: Off by {abs(self.TARGET_RPM - fb_avg):.1f} RPM")
             self.log_result(f"[FAIL] Average RPM outside tolerance (+/-{self.TOLERANCE_RPM})")
         else:
-            self.log_result(f"[PASS] Accuracy within tolerance")
+            self.log_result("[PASS] Accuracy within tolerance")
 
         # Check 2: Stability (Oscillation)
         if fb_stdev > self.MAX_JITTER:
@@ -155,7 +153,7 @@ It calculates Standard Deviation to detect PID oscillation.""",
             self.log_result(f"[FAIL] High Jitter/Oscillation (StdDev: {fb_stdev:.1f})")
             self.log_result("       -> Check P-gain (too high?) or belt tension")
         else:
-            self.log_result(f"[PASS] Stability acceptable")
+            self.log_result("[PASS] Stability acceptable")
 
         # Check 3: At-Speed Signal
         if at_speed < 0.5:

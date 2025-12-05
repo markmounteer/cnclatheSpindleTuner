@@ -89,7 +89,7 @@ TARGETS = PerformanceTargets()
 
 
 @dataclass(frozen=True)
-class TestDescription:
+class ProcedureDescription:
     """Description and operator instructions for a test."""
 
     name: str
@@ -147,7 +147,7 @@ class BaseTest(ABC):
 
     @classmethod
     @abstractmethod
-    def get_description(cls) -> TestDescription:
+    def get_description(cls) -> ProcedureDescription:
         """Return detailed description of the test."""
 
     @abstractmethod

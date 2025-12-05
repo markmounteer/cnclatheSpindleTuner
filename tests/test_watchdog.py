@@ -22,7 +22,7 @@ except ImportError:
     _HAS_TKINTER = False
 
 from config import MONITOR_PINS
-from tests.base import BaseTest, TestDescription
+from tests.base import BaseTest, ProcedureDescription
 
 
 class WatchdogTest(BaseTest):
@@ -32,8 +32,8 @@ class WatchdogTest(BaseTest):
     GUIDE_REF = "Guide §6.6"
 
     @classmethod
-    def get_description(cls) -> TestDescription:
-        return TestDescription(
+    def get_description(cls) -> ProcedureDescription:
+        return ProcedureDescription(
             name="Encoder Watchdog Test (Mock)",
             guide_ref="§6.6",
             purpose=(

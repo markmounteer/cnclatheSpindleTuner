@@ -7,7 +7,7 @@ Comprehensive verification before tuning session.
 import time
 
 from config import MONITOR_PINS, BASELINE_PARAMS
-from tests.base import BaseTest, TestDescription
+from tests.base import BaseTest, ProcedureDescription
 
 
 # =============================================================================
@@ -39,8 +39,8 @@ class PreflightTest(BaseTest):
     GUIDE_REF = "Guide §5, §14.3"
 
     @classmethod
-    def get_description(cls) -> TestDescription:
-        return TestDescription(
+    def get_description(cls) -> ProcedureDescription:
+        return ProcedureDescription(
             name="Pre-Flight Check",
             guide_ref="§5, §14.3",
             purpose="""

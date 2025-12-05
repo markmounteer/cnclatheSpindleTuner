@@ -5,7 +5,7 @@ Tests complete 0 -> Target -> 0 RPM cycle with dynamic monitoring.
 """
 
 import time
-from tests.base import BaseTest, TestDescription
+from tests.base import BaseTest, ProcedureDescription
 
 
 class RampTest(BaseTest):
@@ -20,8 +20,8 @@ class RampTest(BaseTest):
     TOLERANCE_RPM = 50    # RPM range considered "at speed"
 
     @classmethod
-    def get_description(cls) -> TestDescription:
-        return TestDescription(
+    def get_description(cls) -> ProcedureDescription:
+        return ProcedureDescription(
             name="Full Ramp Test",
             guide_ref="",
             purpose=f"""

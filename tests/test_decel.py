@@ -7,7 +7,7 @@ import time
 from typing import List, Tuple
 
 from config import MONITOR_PINS
-from tests.base import BaseTest, TestDescription
+from tests.base import BaseTest, ProcedureDescription
 
 
 class DecelTest(BaseTest):
@@ -17,8 +17,8 @@ class DecelTest(BaseTest):
     GUIDE_REF = ""
 
     @classmethod
-    def get_description(cls) -> TestDescription:
-        return TestDescription(
+    def get_description(cls) -> ProcedureDescription:
+        return ProcedureDescription(
             name="Deceleration Test",
             guide_ref="",
             purpose="""

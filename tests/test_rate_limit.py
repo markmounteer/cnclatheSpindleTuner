@@ -8,7 +8,7 @@ import time
 from typing import Optional
 
 from config import MONITOR_PINS
-from tests.base import BaseTest, TestDescription
+from tests.base import BaseTest, ProcedureDescription
 
 
 class RateLimitTest(BaseTest):
@@ -18,8 +18,8 @@ class RateLimitTest(BaseTest):
     GUIDE_REF = "Guide §6.4"
 
     @classmethod
-    def get_description(cls) -> TestDescription:
-        return TestDescription(
+    def get_description(cls) -> ProcedureDescription:
+        return ProcedureDescription(
             name="Rate Limit Verification",
             guide_ref="§6.4",
             purpose="""

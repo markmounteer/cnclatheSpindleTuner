@@ -14,7 +14,7 @@ else:
     messagebox = None
 
 from config import MONITOR_PINS
-from tests.base import BaseTest, TestDescription
+from tests.base import BaseTest, ProcedureDescription
 
 
 class ReverseTest(BaseTest):
@@ -30,8 +30,8 @@ class ReverseTest(BaseTest):
     TEST_DURATION = 4.0  # Seconds to run
 
     @classmethod
-    def get_description(cls) -> TestDescription:
-        return TestDescription(
+    def get_description(cls) -> ProcedureDescription:
+        return ProcedureDescription(
             name="Reverse PID Test (M4)",
             guide_ref="§6.3",
             purpose="""
@@ -160,7 +160,7 @@ ACTIVE SOFTWARE MONITORING detects runaway (>750 RPM) and issues M5 automaticall
         self.hal.send_mdi("M5")
 
         # 4. Report Results
-        self.log_result(f"\nFinal Readings:")
+        self.log_result("\nFinal Readings:")
         self.log_result(f"  Raw feedback: {fb_raw:.1f} RPM (Target: Negative)")
         self.log_result(f"  ABS feedback: {fb_abs:.1f} RPM (Target: Positive)")
         self.log_result(f"  PID feedback: {pid_fb:.1f} RPM (Target: Positive)")
