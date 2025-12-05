@@ -1,3 +1,27 @@
+# Spindle Tuner v6.0 - Tests Folder Review (2025-12-05)
+
+## Summary
+
+Reviewed all files under `tests/` following the structured multi-pass process. No uncertain errors or feature
+suggestions were identified, and register files were initialized for future tracking. Applied one confirmed
+correction and recompiled the test suite to verify syntax.
+
+---
+
+## Corrections Applied
+
+### 1. Removed Unused Import in Forward PID Test
+
+**Problem**: `statistics` was imported but never used in `tests/test_forward.py`, causing an avoidable lint issue.
+
+**Fix**: Removed the unused import to keep the test module clean.
+
+---
+
+## Verification
+
+- `python -m compileall tests`
+
 # Spindle Tuner v6.0 - hal_interface.py Review (Grammar Updates)
 # Spindle Tuner v6.0 - dashboard.py Review (2025-12-05)
 

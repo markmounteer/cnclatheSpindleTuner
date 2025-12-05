@@ -6,7 +6,6 @@ Checks for target accuracy, stability (jitter), and at-speed signal.
 """
 
 import time
-import statistics
 
 from config import MONITOR_PINS
 from tests.base import BaseTest, ProcedureDescription
