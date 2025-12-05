@@ -22,7 +22,6 @@ Improvements in this version:
 import configparser
 import logging
 import math
-import os
 import platform
 import random
 import shutil
@@ -194,7 +193,6 @@ class MockPhysicsEngine:
         
         # Get current state
         target = self.state.cmd
-        direction = self.state.direction
         current_rpm = self.state.rpm
         limited_cmd = self.state.limited_cmd
         params = self.state.params
@@ -684,7 +682,9 @@ class HalInterface:
         values: Dict[str, float] = {}
         targets = set(pin_names)
 
-        args = ['-s', 'show', 'pin', '-F', '%n %v', *targets]
+        # Use 'halcmd -s show pin <pin1> <pin2> ...' to fetch multiple pins
+        # Output format: "size type dir value name" (5 columns, name is last)
+        args = ['-s', 'show', 'pin', *targets]
 
         try:
             result = self._run_halcmd(args, timeout=1.5)
@@ -699,12 +699,17 @@ class HalInterface:
             logger.warning(f"halcmd bulk read failed: {result.stderr}")
             return values
 
+        # Parse halcmd output: "size type dir value name"
+        # Example: "     4 float IN      0 pid.s.feedback"
         for line in result.stdout.splitlines():
-            parts = line.strip().split(maxsplit=1)
-            if len(parts) != 2:
+            parts = line.split()
+            if len(parts) < 5:
                 continue
 
-            name, raw_value = parts
+            # Name is last column, value is second-to-last
+            name = parts[-1]
+            raw_value = parts[-2]
+
             if name not in targets:
                 continue
 
