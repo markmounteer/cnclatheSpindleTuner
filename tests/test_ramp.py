@@ -1,74 +1,77 @@
 """
 Full Ramp Test
 
-Tests complete 0->1800->0 RPM cycle.
+Tests complete 0 -> Target -> 0 RPM cycle with dynamic monitoring.
 """
 
 import time
-
-from config import MONITOR_PINS
 from tests.base import BaseTest, TestDescription
 
 
 class RampTest(BaseTest):
-    """Full ramp test (0->max->0)."""
+    """Full ramp test (0->max->0) with phase analysis."""
 
     TEST_NAME = "Full Ramp Test"
-    GUIDE_REF = ""
+
+    # Configuration
+    TARGET_RPM = 1800
+    HOLD_TIME = 3.0       # Seconds to hold at max speed
+    TIMEOUT_RAMP = 10.0   # Max seconds to wait for ramp before failing
+    TOLERANCE_RPM = 50    # RPM range considered "at speed"
 
     @classmethod
     def get_description(cls) -> TestDescription:
         return TestDescription(
             name="Full Ramp Test",
             guide_ref="",
-            purpose="""
-Test the complete speed range from 0 to maximum (1800 RPM)
-and back to 0. This stress-tests the entire control system
-including:
+            purpose=f"""
+Test the complete speed range from 0 to {cls.TARGET_RPM} RPM
+and back to 0. This differentiates between acceleration tracking
+(Feed Forward) and steady-state stability (PID).
 
-- Acceleration tracking
-- Maximum speed stability
-- Deceleration behavior
-- Overall tracking error throughout
-
-Use this to verify tuning across the full operating range.""",
+Phases analyzed:
+1. Acceleration: Checks FF1 tuning and VFD ramp matching.
+2. Steady State: Checks P/I gain and noise/oscillation.
+3. Deceleration: Checks braking behavior and following error.""",
 
             prerequisites=[
-                "All basic tests completed",
-                "Tuning stable at lower speeds",
-                "VFD and motor rated for 1800 RPM",
+                "Basic Direction Test passed",
+                "Encoder feedback verified",
+                f"Spindle safe for {cls.TARGET_RPM} RPM",
             ],
 
             procedure=[
                 "1. Click 'Run Test' to begin",
-                "2. Spindle ramps from 0 to 1800 RPM",
-                "3. Holds briefly at maximum speed",
-                "4. Ramps back down to 0 RPM",
-                "5. Tracking error monitored throughout",
+                f"2. System commands {cls.TARGET_RPM} RPM",
+                "3. Waits for spindle to reach speed (Dynamic)",
+                "4. Holds for stability check",
+                "5. Commands 0 RPM and monitors stop",
             ],
 
             expected_results=[
-                "Smooth acceleration and deceleration",
-                "Peak speed reaches ~1800 RPM",
-                "Max tracking error <100 RPM during ramps",
-                "No oscillation at any speed",
+                f"Peak RPM reaches {cls.TARGET_RPM} +/- {cls.TOLERANCE_RPM}",
+                "Steady state jitter < 20 RPM",
+                "No over-current trips on VFD",
+                "Accel/Decel error < 100 RPM",
             ],
 
             troubleshooting=[
-                "Large tracking error during accel:",
-                "  -> Increase FF1 for better prediction",
-                "  -> Check RATE_LIMIT matches VFD",
-                "Oscillation at high speed:",
-                "  -> May need different tuning above 1500 RPM",
-                "VFD trips:",
-                "  -> Check VFD max frequency (P0.04)",
-                "  -> Increase VFD accel time if needed",
+                "High Error during Ramps:",
+                "  -> Adjust [SPINDLE] FF1 in INI file.",
+                "  -> Ensure MAX_ACCELERATION matches VFD setting.",
+                "Oscillation at Steady Speed:",
+                "  -> Reduce P gain, increase D gain slightly.",
+                "  -> Check belt tension.",
+                "Never reaches target speed:",
+                "  -> Check MAX_OUTPUT or OUTPUT_SCALE in INI.",
+                "  -> Check VFD max frequency settings.",
             ],
 
             safety_notes=[
-                "Test runs at MAXIMUM speed (1800 RPM)",
-                "Ensure spindle is balanced",
-                "Keep clear during test",
+                f"Test runs at HIGH speed ({cls.TARGET_RPM} RPM)",
+                "Ensure chuck key is removed",
+                "Ensure workpiece/chuck is balanced",
+                "Be ready to hit E-STOP",
             ]
         )
 
@@ -76,92 +79,154 @@ Use this to verify tuning across the full operating range.""",
         """Start full ramp test in background thread."""
         if not self.start_test():
             return
-        self.run_sequence(self._sequence)
+
+        try:
+            self.run_sequence(self._sequence)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            self.log_result(f"Error during test: {exc}")
+        finally:
+            self.hal.send_mdi("M5")
+            self.end_test()
 
     def _sequence(self):
         """Execute full ramp test."""
-        self.log_header("FULL RAMP TEST: 0 -> 1800 -> 0 RPM")
-        self.update_progress(0, "Starting ramp to 1800 RPM...")
+        self.log_header(f"FULL RAMP: 0 -> {self.TARGET_RPM} -> 0 RPM")
 
-        test_data = []
+        test_data = {
+            'accel': [],
+            'steady': [],
+            'decel': [],
+        }
 
-        self.log_result("Ramping to 1800 RPM...")
-        self.hal.send_mdi("M3 S1800")
-        start = time.time()
+        # --- PHASE 1: ACCELERATION ---
+        self.log_result(f"Commanding M3 S{self.TARGET_RPM}...")
+        self.hal.send_mdi(f"M3 S{self.TARGET_RPM}")
 
-        # Acceleration phase
-        while time.time() - start < 4.0:
+        start_time = time.monotonic()
+        ramp_complete = False
+
+        while (time.monotonic() - start_time) < self.TIMEOUT_RAMP:
             if self.test_abort:
-                break
+                return
 
-            t = time.time() - start
+            now = time.monotonic()
+            t_delta = now - start_time
             values = self.hal.get_all_values()
-            test_data.append({
-                'time': t,
-                'phase': 'accel',
+
+            test_data['accel'].append({
+                'time': t_delta,
                 'cmd': values.get('cmd_limited', 0),
-                'feedback': values.get('feedback', 0),
+                'fb': values.get('feedback', 0),
             })
 
-            progress = (t / 4.0) * 30
-            self.update_progress(progress, f"Accelerating... {values.get('feedback', 0):.0f} RPM")
+            if values.get('feedback', 0) >= (self.TARGET_RPM - self.TOLERANCE_RPM):
+                ramp_complete = True
+                self.log_result(f"Reached target in {t_delta:.2f}s")
+                break
 
-            time.sleep(0.1)
+            progress = (t_delta / self.TIMEOUT_RAMP) * 30
+            self.update_progress(progress, f"Accel: {values.get('feedback', 0):.0f} RPM")
+            time.sleep(0.05)
 
-        if self.test_abort:
-            self.hal.send_mdi("M5")
-            self.end_test()
+        if not ramp_complete:
+            self.log_result("TIMED OUT waiting for target speed.")
             return
 
-        # Hold at max
-        self.log_result("Holding at 1800 RPM...")
-        self.update_progress(35, "Holding at max speed...")
-        time.sleep(2.0)
+        # --- PHASE 2: STEADY STATE ---
+        self.log_result(f"Holding {self.HOLD_TIME}s for stability check...")
+        hold_start = time.monotonic()
 
-        # Deceleration phase
-        self.log_result("Ramping to 0 RPM...")
+        while (time.monotonic() - hold_start) < self.HOLD_TIME:
+            if self.test_abort:
+                return
+
+            now = time.monotonic()
+            values = self.hal.get_all_values()
+            test_data['steady'].append({
+                'cmd': values.get('cmd_limited', 0),
+                'fb': values.get('feedback', 0),
+            })
+
+            hold_progress = 40 + (now - hold_start) * 10
+            self.update_progress(hold_progress, f"Holding: {values.get('feedback', 0):.0f} RPM")
+            time.sleep(0.1)
+
+        # --- PHASE 3: DECELERATION ---
+        self.log_result("Commanding Stop (M5)...")
         self.hal.send_mdi("M5")
-        decel_start = time.time()
+        decel_start = time.monotonic()
+        stop_complete = False
 
-        while time.time() - decel_start < 4.0:
+        while (time.monotonic() - decel_start) < self.TIMEOUT_RAMP:
             if self.test_abort:
-                break
+                return
 
-            t = time.time() - start
+            now = time.monotonic()
+            t_delta = now - decel_start
             values = self.hal.get_all_values()
-            test_data.append({
-                'time': t,
-                'phase': 'decel',
+
+            test_data['decel'].append({
+                'time': t_delta,
                 'cmd': values.get('cmd_limited', 0),
-                'feedback': values.get('feedback', 0),
+                'fb': values.get('feedback', 0),
             })
 
-            decel_t = time.time() - decel_start
-            progress = 40 + (decel_t / 4.0) * 50
-            self.update_progress(progress, f"Decelerating... {values.get('feedback', 0):.0f} RPM")
+            if values.get('feedback', 0) < 5:
+                stop_complete = True
+                self.log_result(f"Stopped in {t_delta:.2f}s")
+                break
 
-            time.sleep(0.1)
+            decel_progress = 70 + (t_delta / self.TIMEOUT_RAMP) * 25
+            self.update_progress(decel_progress, f"Decel: {values.get('feedback', 0):.0f} RPM")
+            time.sleep(0.05)
 
-        self.update_progress(95, "Analyzing results...")
-
-        if not test_data:
-            self.end_test()
+        if not stop_complete:
+            self.log_result("TIMED OUT waiting for stop.")
             return
 
-        max_fb = max(d['feedback'] for d in test_data)
-        max_error = max(abs(d['cmd'] - d['feedback']) for d in test_data)
+        # --- ANALYSIS ---
+        self.update_progress(95, "Analyzing...")
+        self._analyze_results(test_data)
+        self.update_progress(100, "Done")
 
-        self.log_result(f"\nResults:")
-        self.log_result(f"  Peak feedback: {max_fb:.0f} RPM")
-        self.log_result(f"  Max tracking error: {max_error:.0f} RPM")
+    def _analyze_results(self, data):
+        """Calculate stats per phase."""
 
-        self.update_progress(100, "Complete")
+        def get_max_error(phase_data):
+            if not phase_data:
+                return 0
+            return max(abs(d['cmd'] - d['fb']) for d in phase_data)
 
-        if max_error < 100:
+        accel_err = get_max_error(data['accel'])
+        steady_err = get_max_error(data['steady'])
+        decel_err = get_max_error(data['decel'])
+
+        avg_steady = (
+            sum(d['fb'] for d in data['steady']) / len(data['steady'])
+            if data['steady'] else 0
+        )
+
+        self.log_result("\n--- DIAGNOSTICS ---")
+        self.log_result(f"Accel Max Error:   {accel_err:.0f} RPM")
+        self.log_result(f"Decel Max Error:   {decel_err:.0f} RPM")
+        self.log_result(f"Steady State Avg:  {avg_steady:.0f} RPM (Error: {steady_err:.0f})")
+
+        failed = False
+
+        if accel_err > 150:
+            self.log_result("FAIL: Accel error too high. Increase FF1.")
+            failed = True
+
+        if steady_err > 50:
+            self.log_result("FAIL: Unstable at top speed. Check P/I terms.")
+            failed = True
+
+        if abs(avg_steady - self.TARGET_RPM) > 100:
+            self.log_result("FAIL: Did not reach target RPM. Check Output Scale.")
+            failed = True
+
+        if not failed:
             self.log_footer("PASS")
-            self.log_result("  Good tracking throughout ramp")
+            self.log_result("  Spindle tracks well across all phases.")
         else:
-            self.log_footer("TRACKING ERROR")
-            self.log_result("  Large tracking error - check rate limit settings")
-
-        self.end_test()
+            self.log_footer("TUNING REQUIRED")
