@@ -15,6 +15,8 @@ Options:
 import sys
 import time
 import logging
+import threading
+import queue
 import tkinter as tk
 from tkinter import ttk, messagebox
 
@@ -60,9 +62,13 @@ class SpindleTunerApp:
         self.hal = HalInterface(mock=mock)
         self.logger = DataLogger()
         self.ini_handler = IniFileHandler()
-        
+
         # Current values cache
         self.current_values = {}
+        self._last_commanded_speed = None
+        self._last_commanded_direction = None
+        self._hal_queue: "queue.Queue[dict]" = queue.Queue(maxsize=1)
+        self._hal_stop_event = threading.Event()
         
         # Store default background for fault status
         self.default_bg = self.root.cget('bg')
@@ -264,16 +270,23 @@ class SpindleTunerApp:
     
     def _start_update_loop(self):
         """Start the main update loop."""
+        self._start_hal_worker()
         self._update()
-    
+
     def _update(self):
         """Main update loop - called every UPDATE_INTERVAL_MS."""
+        start_time = time.time()
         try:
             # 1. Update Connection Status
             self._update_connection_status()
-            
+
             # 2. Get current values from HAL
-            self.current_values = self.hal.get_all_values()
+            try:
+                self.current_values = self._hal_queue.get_nowait()
+            except queue.Empty:
+                pass
+
+            self._track_last_spindle_command()
             
             # 3. Check for Faults/E-Stop
             self._update_fault_status()
@@ -296,9 +309,49 @@ class SpindleTunerApp:
             
         except Exception as e:
             logger.error(f"Update loop error: {e}")
-        
+
         # Schedule next update
-        self.root.after(UPDATE_INTERVAL_MS, self._update)
+        elapsed = (time.time() - start_time) * 1000
+        next_delay = max(1, int(UPDATE_INTERVAL_MS - elapsed))
+        self.root.after(next_delay, self._update)
+
+    def _start_hal_worker(self):
+        """Start background worker to fetch HAL values."""
+        def worker():
+            while not self._hal_stop_event.is_set():
+                loop_start = time.time()
+                try:
+                    values = self.hal.get_all_values()
+                    try:
+                        self._hal_queue.get_nowait()
+                    except queue.Empty:
+                        pass
+                    self._hal_queue.put(values)
+                except Exception as e:
+                    logger.error(f"HAL fetch error: {e}")
+
+                elapsed = time.time() - loop_start
+                sleep_time = max(0, (UPDATE_INTERVAL_MS / 1000.0) - elapsed)
+                self._hal_stop_event.wait(sleep_time)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _track_last_spindle_command(self):
+        """Track the most recent commanded spindle speed and direction."""
+        cmd_raw = self.current_values.get('cmd_raw')
+        if cmd_raw is None:
+            cmd_raw = self.current_values.get('cmd_limited')
+
+        if cmd_raw is None:
+            return
+
+        speed = abs(cmd_raw)
+        if speed <= 0:
+            return
+
+        direction = 'M3' if cmd_raw > 0 else 'M4'
+        self._last_commanded_speed = speed
+        self._last_commanded_direction = direction
     
     def _update_connection_status(self):
         """Update connection indicator based on HAL state."""
@@ -355,11 +408,25 @@ class SpindleTunerApp:
     
     def _toggle_spindle(self):
         """Toggle spindle on/off."""
+        focused = self.root.focus_get()
+        if isinstance(focused, (tk.Entry, tk.Text, ttk.Entry)):
+            return
+
         if self.current_values.get('spindle_on', 0) > 0.5:
             self.hal.send_mdi("M5")
             logger.info("Spindle stop requested (Spacebar)")
         else:
-            self.hal.send_mdi("M3 S1000")
+            if not self._last_commanded_direction or self._last_commanded_speed is None:
+                messagebox.showwarning(
+                    "Unknown Spindle State",
+                    "Cannot resume spindle because the previous direction/speed are unknown."
+                    " Please start the spindle manually from the controls."
+                )
+                logger.warning("Spindle start via toggle blocked: unknown previous state")
+                return
+
+            command = f"{self._last_commanded_direction} S{int(round(self._last_commanded_speed))}"
+            self.hal.send_mdi(command)
             logger.info("Spindle start requested (Spacebar)")
     
     def _emergency_stop(self):
@@ -384,6 +451,11 @@ class SpindleTunerApp:
     
     def _on_closing(self):
         """Handle application closure with safety check."""
+        try:
+            self.hal.send_mdi("M5")
+        except Exception:
+            logger.warning("Failed to issue spindle stop on exit")
+
         if self.current_values.get('spindle_on', 0) > 0.5:
             prompt = (
                 "The spindle is currently running.\n\n"
@@ -398,7 +470,9 @@ class SpindleTunerApp:
             elif result:  # Yes - stop spindle first
                 self.hal.send_mdi("M5")
                 logger.info("Spindle stopped on exit")
-        
+
+        self._hal_stop_event.set()
+
         logger.info("Application closing...")
         self.root.destroy()
     
