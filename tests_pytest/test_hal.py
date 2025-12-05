@@ -5,7 +5,7 @@ import time
 
 import pytest
 
-from hal import HalInterface
+from hal_interface import HalInterface
 
 
 def test_clamp_and_snap_respects_range():

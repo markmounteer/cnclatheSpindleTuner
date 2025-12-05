@@ -21,7 +21,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 from config import APP_TITLE, APP_VERSION, UPDATE_INTERVAL_MS
-from hal import HalInterface, IniFileHandler, ConnectionState
+from hal_interface import HalInterface, IniFileHandler, ConnectionState
 from logger import DataLogger
 from dashboard import DashboardTab
 from tests import TestsTab, ChecklistsTab  # Now imports from tests/ package
@@ -69,6 +69,10 @@ class SpindleTunerApp:
         self._last_commanded_direction = None
         self._hal_queue: "queue.Queue[dict]" = queue.Queue(maxsize=1)
         self._hal_stop_event = threading.Event()
+
+        # Reconnect backoff (prevent thrashing at 100ms intervals)
+        self._last_reconnect_attempt = 0.0
+        self._reconnect_interval_s = 5.0  # Only attempt reconnect every 5 seconds
         
         # Store default background for fault status
         self.default_bg = self.root.cget('bg')
@@ -356,7 +360,7 @@ class SpindleTunerApp:
     def _update_connection_status(self):
         """Update connection indicator based on HAL state."""
         state = self.hal.connection_state
-        
+
         if state == ConnectionState.MOCK:
             self.status_conn.config(text="● MOCK MODE", foreground="orange")
         elif state == ConnectionState.CONNECTED:
@@ -365,7 +369,11 @@ class SpindleTunerApp:
             self.status_conn.config(text="◌ Connecting...", foreground="blue")
         else:  # DISCONNECTED or ERROR
             self.status_conn.config(text="● Disconnected", foreground="red")
-            self.hal.reconnect()
+            # Only attempt reconnect with backoff to prevent thrashing
+            now = time.time()
+            if now - self._last_reconnect_attempt >= self._reconnect_interval_s:
+                self._last_reconnect_attempt = now
+                self.hal.reconnect()
     
     def _update_fault_status(self):
         """Monitor safety signals and update fault display."""
