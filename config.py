@@ -13,7 +13,7 @@ Centralized configuration for:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Final, NamedTuple, Dict, List, Tuple
+from typing import Final, NamedTuple, Dict, List, Tuple, TypedDict
 
 
 # ==============================================================================
@@ -35,6 +35,11 @@ HISTORY_SAMPLES: Final[int] = int(HISTORY_DURATION_S * UPDATE_HZ)
 # File paths
 DEFAULT_CONFIG_DIR: Final[Path] = Path.home() / "linuxcnc" / "configs" / "Grizzly7x14_Lathe"
 PROFILES_DIR: Final[Path] = Path.home() / ".spindle_tuner_profiles"
+
+
+# Type aliases for clarity
+Preset = Dict[str, float]
+PresetCollection = Dict[str, Preset]
 
 
 # ==============================================================================
@@ -73,6 +78,7 @@ MONITOR_PINS: Dict[str, str] = {
 
 class TuningParamSpec(NamedTuple):
     """Metadata for a writable tuning parameter (tuple-compatible for backward compat)."""
+
     hal_pin: str
     description: str
     min_val: float
@@ -116,7 +122,7 @@ BASELINE_PARAMS: Dict[str, float] = {
 }
 
 # Tuning presets
-PRESETS: Dict[str, Dict[str, float]] = {
+PRESETS: PresetCollection = {
     "conservative": {
         "P": 0.05, "I": 0.8, "FF1": 0.30,
         "Deadband": 15.0, "MaxErrorI": 50.0, "RateLimit": 1000.0,
@@ -133,7 +139,32 @@ PRESETS: Dict[str, Dict[str, float]] = {
 # HARDWARE SPECIFICATIONS
 # ==============================================================================
 
-MOTOR_SPECS: Dict[str, object] = {
+class MotorSpecs(TypedDict):
+    name: str
+    power_hp: float
+    base_speed_rpm: int
+    sync_speed_rpm: int
+    cold_slip_pct: float
+    hot_slip_pct: float
+    thermal_time_const_min: int
+
+
+class VfdSpecs(TypedDict):
+    name: str
+    accel_time_s: float
+    decel_time_s: float
+    max_freq_hz: int
+    transport_delay_s: float
+
+
+class EncoderSpecs(TypedDict):
+    name: str
+    counts_per_rev: int
+    differential: bool
+    dpll_timer_us: int
+
+
+MOTOR_SPECS: MotorSpecs = {
     "name": "Baldor M3558T",
     "power_hp": 2.0,
     "base_speed_rpm": 1750,
@@ -143,7 +174,7 @@ MOTOR_SPECS: Dict[str, object] = {
     "thermal_time_const_min": 20,
 }
 
-VFD_SPECS: Dict[str, object] = {
+VFD_SPECS: VfdSpecs = {
     "name": "XSY-AT1",
     "accel_time_s": 1.5,
     "decel_time_s": 1.5,
@@ -151,7 +182,7 @@ VFD_SPECS: Dict[str, object] = {
     "transport_delay_s": 1.5,
 }
 
-ENCODER_SPECS: Dict[str, object] = {
+ENCODER_SPECS: EncoderSpecs = {
     "name": "ABILKEEN 1024 PPR",
     "counts_per_rev": 4096,
     "differential": True,
@@ -254,6 +285,39 @@ PLOT_DEFAULTS: Dict[str, bool] = {
 
 
 # ==============================================================================
+# HELPER FUNCTIONS
+# ==============================================================================
+
+def get_monitor_pin(name: str, default: str | None = None) -> str:
+    """Return a HAL pin name for a monitor signal, optionally with a fallback."""
+
+    if default is None:
+        return MONITOR_PINS[name]
+    return MONITOR_PINS.get(name, default)
+
+
+def get_baseline_params() -> Dict[str, float]:
+    """Return a copy of the baseline tuning parameters to avoid accidental mutation."""
+
+    return BASELINE_PARAMS.copy()
+
+
+def get_preset(name: str) -> Preset:
+    """Return a copy of a preset's tuning parameters, validating the name."""
+
+    if name not in PRESETS:
+        available = ", ".join(sorted(PRESETS)) or "<none>"
+        raise KeyError(f"Unknown preset '{name}'. Available presets: {available}")
+    return PRESETS[name].copy()
+
+
+def list_presets() -> Tuple[str, ...]:
+    """Return preset names sorted for stable presentation in UIs."""
+
+    return tuple(sorted(PRESETS.keys()))
+
+
+# ==============================================================================
 # PUBLIC EXPORT LIST
 # ==============================================================================
 
@@ -270,4 +334,7 @@ __all__ = [
     "SYMPTOM_DIAGNOSIS",
     "HARDWARE_CHECKLIST", "COMMISSIONING_CHECKLIST",
     "PLOT_TRACES", "PLOT_DEFAULTS",
+    "MotorSpecs", "VfdSpecs", "EncoderSpecs",
+    "Preset", "PresetCollection",
+    "get_baseline_params", "get_preset", "list_presets", "get_monitor_pin",
 ]
