@@ -300,6 +300,32 @@ class TroubleshooterTab:
         
         self._setup_ui()
 
+    def _hal_flag(self, attr: str, default: bool = False) -> bool:
+        """Safely read a HAL attribute that may be a property or method."""
+        flag = getattr(self.hal, attr, None)
+
+        try:
+            if callable(flag):
+                return bool(flag())
+            if flag is None:
+                return default
+            return bool(flag)
+        except Exception:
+            return default
+
+    @staticmethod
+    def _coerce_float(value: Any) -> Optional[float]:
+        """Convert arbitrary input to float, returning None on failure."""
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _format_value(value: Optional[float]) -> str:
+        """Format a numeric value for display, using '--' when missing."""
+        return f"{value:.3f}" if value is not None else "--"
+
     def _setup_ui(self):
         """Build the main UI layout."""
         # Split into two panes: Audit/Wizard (Left) and Reference Library (Right)
@@ -340,23 +366,35 @@ class TroubleshooterTab:
         
         # Mousewheel scrolling
         def _on_mousewheel(event):
-            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-        
+            delta = event.delta
+
+            if delta:
+                # macOS sends small deltas (e.g., +/-1); normalize to 120 steps
+                if abs(delta) < 120:
+                    delta = 120 if delta > 0 else -120
+                canvas.yview_scroll(int(-delta / 120), "units")
+
         def _on_mousewheel_linux(event):
             if event.num == 4:
                 canvas.yview_scroll(-1, "units")
             elif event.num == 5:
                 canvas.yview_scroll(1, "units")
-        
-        # Bind mousewheel to canvas and all children
-        def _bind_mousewheel(widget):
-            widget.bind("<MouseWheel>", _on_mousewheel)
-            widget.bind("<Button-4>", _on_mousewheel_linux)
-            widget.bind("<Button-5>", _on_mousewheel_linux)
-        
-        _bind_mousewheel(canvas)
-        _bind_mousewheel(frame)
-        
+
+        def _bind_to_mousewheel(_event):
+            canvas.bind_all("<MouseWheel>", _on_mousewheel)
+            canvas.bind_all("<Button-4>", _on_mousewheel_linux)
+            canvas.bind_all("<Button-5>", _on_mousewheel_linux)
+
+        def _unbind_from_mousewheel(_event):
+            canvas.unbind_all("<MouseWheel>")
+            canvas.unbind_all("<Button-4>")
+            canvas.unbind_all("<Button-5>")
+
+        # Bind mousewheel to canvas and children when cursor enters the area
+        for widget in (canvas, frame):
+            widget.bind("<Enter>", _bind_to_mousewheel)
+            widget.bind("<Leave>", _unbind_from_mousewheel)
+
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
@@ -425,27 +463,25 @@ class TroubleshooterTab:
         Compare current HAL values against recommendations.
         Sorts results so Critical (Red) items appear at the top.
         """
-        if not self.hal.is_connected and not self.hal.is_mock:
+        if not self._hal_flag("is_connected") and not self._hal_flag("is_mock"):
             self._show_status("Not connected to HAL")
             return
 
         audit_results = []
+        severity_map = {
+            'red': 3,
+            'orange': 2,
+            'yellow': 1,
+            'gray': 1,
+            'green': 0,
+        }
 
         for param in self.audit_params:
-            val = self.hal.get_param(param)
-            if val is None:
-                val = 0.0  # Default to 0 if parameter not found
+            raw_val = self.hal.get_param(param)
+            val = self._coerce_float(raw_val)
             msg, color = self._audit_param(param, val)
 
-            severity_map = {
-                'red': 3,
-                'orange': 2,
-                'yellow': 1,
-                'green': 0,
-                'gray': 0,
-            }
-
-            severity = severity_map.get(color, -1)
+            severity = severity_map.get(color, 0)
 
             audit_results.append({
                 'param': param,
@@ -458,6 +494,10 @@ class TroubleshooterTab:
         audit_results.sort(key=lambda x: x['severity'], reverse=True)
 
         warnings = 0
+        infos = 0
+        warning_colors = {'red', 'orange'}
+        info_colors = {'yellow', 'gray'}
+
         for row_idx, res in enumerate(audit_results, 1):
             param = res['param']
             widgets = self.audit_rows[param]
@@ -466,22 +506,27 @@ class TroubleshooterTab:
                 widget.grid(row=row_idx, column=col_idx, sticky="w", padx=5)
 
             lbl_cur, lbl_stat = self.audit_labels[param]
-            lbl_cur.config(text=f"{res['val']:.3f}")
+            lbl_cur.config(text=self._format_value(res['val']))
             lbl_stat.config(text=res['msg'], foreground=res['color'])
 
-            if res['color'] != 'green':
+            if res['color'] in warning_colors:
                 warnings += 1
+            elif res['color'] in info_colors:
+                infos += 1
 
-        if warnings == 0:
+        if warnings == 0 and infos == 0:
             self.audit_summary.config(text="All parameters within recommended ranges",
                                        foreground="green")
+        elif warnings == 0:
+            self.audit_summary.config(text=f"{infos} informational item(s) detected",
+                                       foreground="gray")
         else:
-            self.audit_summary.config(text=f"{warnings} issue(s) detected - listed by severity",
+            self.audit_summary.config(text=f"{warnings} warning(s) detected - listed by severity",
                                        foreground="orange")
 
         self._show_status("Audit complete")
-    
-    def _audit_param(self, param: str, val: float) -> tuple:
+
+    def _audit_param(self, param: str, val: Optional[float]) -> tuple:
         """Audit a single parameter, returning (message, color)."""
         if val is None:
             return ("No value", "gray")
@@ -510,7 +555,7 @@ class TroubleshooterTab:
             if val > 0.5:
                 return ("HIGH - overshoot risk", "orange")
             elif val < 0.3:
-                return ("LOW - slow ramp", "gray")
+                return ("LOW - slow ramp", "yellow")
         
         elif param == 'Deadband':
             if val < 5:
@@ -522,23 +567,23 @@ class TroubleshooterTab:
         
         elif param == 'MaxCmdD':
             if val < 1000:
-                return ("LOW - command limit", "gray")
-        
+                return ("LOW - command limit", "yellow")
+
         elif param == 'RateLimit':
             if val > 2000:
                 return ("HIGH - VFD trip risk", "red")
             elif val < 800:
-                return ("LOW - slow response", "gray")
-        
+                return ("LOW - slow response", "yellow")
+
         elif param == 'FilterGain':
             if val < 0.3:
-                return ("LOW - noise risk", "gray")
+                return ("LOW - noise risk", "yellow")
         
         return ("OK", "green")
     
     def _reset_to_baseline(self):
         """Reset all parameters to baseline values."""
-        if not self.hal.is_connected and not self.hal.is_mock:
+        if not self._hal_flag("is_connected") and not self._hal_flag("is_mock"):
             self._show_status("Not connected to HAL")
             return
         
@@ -609,7 +654,11 @@ class TroubleshooterTab:
         """Render a wizard node (question or result)."""
         for widget in self.wiz_content_frame.winfo_children():
             widget.destroy()
-            
+
+        if not node:
+            self.wiz_question.config(text="Wizard error: missing node.", foreground="red")
+            return
+
         if "question" in node:
             self.wiz_question.config(text=node["question"], foreground="black")
             
@@ -653,19 +702,19 @@ class TroubleshooterTab:
             
     def _apply_wizard_fix(self, actions: Dict[str, float]):
         """Apply the suggested fixes to HAL with confirmation."""
-        if not self.hal.is_connected and not self.hal.is_mock:
+        if not self._hal_flag("is_connected") and not self._hal_flag("is_mock"):
             messagebox.showerror("Error", "Not connected to HAL.")
             return
 
         before_values = {}
         for k in actions:
             val = self.hal.get_param(k)
-            before_values[k] = val if val is not None else 0.0
+            before_values[k] = self._coerce_float(val)
 
         msg = "Apply the following parameter changes?\n\n"
         for k, v in actions.items():
             current = before_values[k]
-            msg += f"  {k}: {current:.3f} ➜ {v}\n"
+            msg += f"  {k}: {self._format_value(current)} ➜ {self._format_value(self._coerce_float(v))}\n"
 
         if messagebox.askyesno("Apply Fix", msg):
             success = True
@@ -677,11 +726,11 @@ class TroubleshooterTab:
                 after_values = {}
                 for k in actions:
                     val = self.hal.get_param(k)
-                    after_values[k] = val if val is not None else 0.0
+                    after_values[k] = self._coerce_float(val)
                 diff_lines = ["Changes applied:"]
                 for param in actions:
                     diff_lines.append(
-                        f"  {param}: {before_values[param]:.3f} ➜ {after_values[param]:.3f}"
+                        f"  {param}: {self._format_value(before_values[param])} ➜ {self._format_value(after_values[param])}"
                     )
 
                 messagebox.showinfo("Success", "\n".join(diff_lines))
@@ -743,17 +792,32 @@ class TroubleshooterTab:
         
         # Mousewheel scrolling
         def _on_mousewheel(event):
-            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-        
+            delta = event.delta
+
+            if delta:
+                if abs(delta) < 120:
+                    delta = 120 if delta > 0 else -120
+                canvas.yview_scroll(int(-delta / 120), "units")
+
         def _on_mousewheel_linux(event):
             if event.num == 4:
                 canvas.yview_scroll(-1, "units")
             elif event.num == 5:
                 canvas.yview_scroll(1, "units")
-        
-        canvas.bind("<MouseWheel>", _on_mousewheel)
-        canvas.bind("<Button-4>", _on_mousewheel_linux)
-        canvas.bind("<Button-5>", _on_mousewheel_linux)
+
+        def _bind_to_mousewheel(_event):
+            canvas.bind_all("<MouseWheel>", _on_mousewheel)
+            canvas.bind_all("<Button-4>", _on_mousewheel_linux)
+            canvas.bind_all("<Button-5>", _on_mousewheel_linux)
+
+        def _unbind_from_mousewheel(_event):
+            canvas.unbind_all("<MouseWheel>")
+            canvas.unbind_all("<Button-4>")
+            canvas.unbind_all("<Button-5>")
+
+        for widget in (canvas, self.symptom_list_frame):
+            widget.bind("<Enter>", _bind_to_mousewheel)
+            widget.bind("<Leave>", _unbind_from_mousewheel)
         
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
@@ -762,7 +826,12 @@ class TroubleshooterTab:
         self._symptom_widgets.clear()
         self._symptom_data.clear()
         
-        for title, solution, color in SYMPTOM_DIAGNOSIS:
+        for entry in SYMPTOM_DIAGNOSIS:
+            try:
+                title, solution, color = entry
+            except ValueError:
+                continue
+
             widget = self._create_symptom_entry(self.symptom_list_frame, title, solution, color)
             self._symptom_widgets.append(widget)
             self._symptom_data.append((title, solution, color))
