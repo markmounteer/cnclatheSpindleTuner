@@ -296,13 +296,23 @@ class TroubleshooterTab:
         
         # Track symptom entries for filtering
         self._symptom_widgets: List[tk.Frame] = []
-        self._symptom_data: List[tuple] = []
+        self._symptom_data: List[Tuple[str, str, str]] = []
         
         self._setup_ui()
 
     def _hal_flag(self, attr: str, default: bool = False) -> bool:
         """Safely read a HAL attribute that may be a property or method."""
         flag = getattr(self.hal, attr, None)
+        alias_map = {
+            "is_connected": ["connected"],
+            "is_mock": ["mock"],
+        }
+
+        if flag is None:
+            for alt_attr in alias_map.get(attr, []):
+                flag = getattr(self.hal, alt_attr, None)
+                if flag is not None:
+                    break
 
         try:
             if callable(flag):
@@ -325,6 +335,39 @@ class TroubleshooterTab:
     def _format_value(value: Optional[float]) -> str:
         """Format a numeric value for display, using '--' when missing."""
         return f"{value:.3f}" if value is not None else "--"
+
+    def _resolve_hal_method(self, names: List[str]):
+        """Return the first available HAL method from a list of candidates."""
+        for name in names:
+            method = getattr(self.hal, name, None)
+            if callable(method):
+                return method
+        return None
+
+    def _get_hal_param(self, name: str) -> Any:
+        """Retrieve a HAL parameter using available API variants."""
+        getter = self._resolve_hal_method(["get_param", "getp"])
+        if getter is None:
+            return None
+
+        try:
+            return getter(name)
+        except Exception:
+            return None
+
+    def _set_hal_param(self, name: str, value: float) -> bool:
+        """Set a HAL parameter using available API variants."""
+        setter = self._resolve_hal_method(["set_param", "setp"])
+        if setter is None:
+            return False
+
+        try:
+            result = setter(name, value)
+            if result is False:
+                return False
+            return True
+        except Exception:
+            return False
 
     def _setup_ui(self):
         """Build the main UI layout."""
@@ -381,14 +424,16 @@ class TroubleshooterTab:
                 canvas.yview_scroll(1, "units")
 
         def _bind_to_mousewheel(_event):
-            canvas.bind_all("<MouseWheel>", _on_mousewheel)
-            canvas.bind_all("<Button-4>", _on_mousewheel_linux)
-            canvas.bind_all("<Button-5>", _on_mousewheel_linux)
+            for widget in (canvas, frame):
+                widget.bind("<MouseWheel>", _on_mousewheel)
+                widget.bind("<Button-4>", _on_mousewheel_linux)
+                widget.bind("<Button-5>", _on_mousewheel_linux)
 
         def _unbind_from_mousewheel(_event):
-            canvas.unbind_all("<MouseWheel>")
-            canvas.unbind_all("<Button-4>")
-            canvas.unbind_all("<Button-5>")
+            for widget in (canvas, frame):
+                widget.unbind("<MouseWheel>")
+                widget.unbind("<Button-4>")
+                widget.unbind("<Button-5>")
 
         # Bind mousewheel to canvas and children when cursor enters the area
         for widget in (canvas, frame):
@@ -466,6 +511,10 @@ class TroubleshooterTab:
             self._show_status("Not connected to HAL")
             return
 
+        if self._resolve_hal_method(["set_param", "setp"]) is None:
+            self._show_status("HAL API does not provide set_param/setp")
+            return
+
         audit_results = []
         severity_map = {
             'red': 3,
@@ -475,8 +524,13 @@ class TroubleshooterTab:
             'green': 0,
         }
 
+        getter = self._resolve_hal_method(["get_param", "getp"])
+        if getter is None:
+            self._show_status("HAL API does not provide get_param/getp")
+            return
+
         for param in self.audit_params:
-            raw_val = self.hal.get_param(param)
+            raw_val = self._get_hal_param(param)
             val = self._coerce_float(raw_val)
             msg, color = self._audit_param(param, val)
 
@@ -525,7 +579,7 @@ class TroubleshooterTab:
 
         self._show_status("Audit complete")
 
-    def _audit_param(self, param: str, val: Optional[float]) -> tuple:
+    def _audit_param(self, param: str, val: Optional[float]) -> Tuple[str, str]:
         """Audit a single parameter, returning (message, color)."""
         if val is None:
             return ("No value", "gray")
@@ -596,8 +650,8 @@ class TroubleshooterTab:
         success = True
         for param, value in BASELINE_PARAMS.items():
             try:
-                result = self.hal.set_param(param, value)
-                if result is False:
+                result = self._set_hal_param(param, value)
+                if not result:
                     success = False
             except Exception:
                 success = False
@@ -664,8 +718,12 @@ class TroubleshooterTab:
 
         if "question" in node:
             self.wiz_question.config(text=node["question"], foreground="black")
-            
-            for i, (text, next_id) in enumerate(node["options"], 1):
+
+            options = node.get("options", [])
+            if not options:
+                ttk.Label(self.wiz_content_frame, text="No options available for this step.",
+                          foreground="red").pack(anchor="w", pady=2)
+            for i, (text, next_id) in enumerate(options, 1):
                 btn = ttk.Button(self.wiz_content_frame, text=f"{i}. {text}",
                                  command=lambda n=next_id: self._step_wizard(n))
                 btn.pack(fill=tk.X, pady=2, ipady=3)
@@ -709,9 +767,15 @@ class TroubleshooterTab:
             messagebox.showerror("Error", "Not connected to HAL.")
             return
 
+        getter = self._resolve_hal_method(["get_param", "getp"])
+        setter = self._resolve_hal_method(["set_param", "setp"])
+        if getter is None or setter is None:
+            messagebox.showerror("Error", "HAL API does not provide get/set methods.")
+            return
+
         before_values = {}
         for k in actions:
-            val = self.hal.get_param(k)
+            val = self._get_hal_param(k)
             before_values[k] = self._coerce_float(val)
 
         msg = "Apply the following parameter changes?\n\n"
@@ -723,8 +787,8 @@ class TroubleshooterTab:
             success = True
             for param, value in actions.items():
                 try:
-                    result = self.hal.set_param(param, value)
-                    if result is False:
+                    result = self._set_hal_param(param, value)
+                    if not result:
                         success = False
                 except Exception:
                     success = False
@@ -732,7 +796,7 @@ class TroubleshooterTab:
             if success:
                 after_values = {}
                 for k in actions:
-                    val = self.hal.get_param(k)
+                    val = self._get_hal_param(k)
                     after_values[k] = self._coerce_float(val)
                 diff_lines = ["Changes applied:"]
                 for param in actions:
