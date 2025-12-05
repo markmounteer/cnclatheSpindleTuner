@@ -206,6 +206,25 @@ class DashboardTab:
             return float(value)
         except (TypeError, ValueError):
             return default
+
+    @staticmethod
+    def _get_param_meta(param_name: str):
+        """Return parameter metadata with safe defaults for legacy configs."""
+        defaults = ("", "", 0.0, 0.0, 0.0, "", "")
+        meta = TUNING_PARAMS.get(param_name)
+
+        if meta is None:
+            return defaults
+
+        try:
+            seq = list(meta)
+        except TypeError:
+            return defaults
+
+        filled = list(defaults)
+        for i, val in enumerate(seq[:len(filled)]):
+            filled[i] = val
+        return tuple(filled)
     
     # =========================================================================
     # UI SETUP
@@ -527,7 +546,8 @@ class DashboardTab:
         ttk.Label(trace_frame, text="Show:", font=("Arial", 9)).pack(side=tk.LEFT)
         for name, config in PLOT_TRACES.items():
             var = self.show_traces[name]
-            cb = ttk.Checkbutton(trace_frame, text=config['label'],
+            label = config.get('label', name)
+            cb = ttk.Checkbutton(trace_frame, text=label,
                                 variable=var, command=self._update_trace_visibility)
             cb.pack(side=tk.LEFT, padx=5)
     
@@ -563,8 +583,10 @@ class DashboardTab:
             for name in ['cmd', 'feedback']:
                 if name in PLOT_TRACES:
                     config = PLOT_TRACES[name]
-                    line, = self.ax.plot([], [], color=config['color'],
-                                        label=config['label'], linewidth=1.5,
+                    color = config.get('color', 'black')
+                    label = config.get('label', name)
+                    line, = self.ax.plot([], [], color=color,
+                                        label=label, linewidth=1.5,
                                         animated=animated)
                     self.lines[name] = line
 
@@ -572,16 +594,20 @@ class DashboardTab:
             for name in ['error', 'errorI']:
                 if name in PLOT_TRACES:
                     config = PLOT_TRACES[name]
-                    line, = self.ax2.plot([], [], color=config['color'],
-                                         label=config['label'], linewidth=1.5,
+                    color = config.get('color', 'black')
+                    label = config.get('label', name)
+                    line, = self.ax2.plot([], [], color=color,
+                                         label=label, linewidth=1.5,
                                          linestyle='--', animated=animated)
                     self.lines[name] = line
         else:
             # Single axis mode
             self.ax2 = None
             for name, config in PLOT_TRACES.items():
-                line, = self.ax.plot([], [], color=config['color'],
-                                    label=config['label'], linewidth=1.5,
+                color = config.get('color', 'black')
+                label = config.get('label', name)
+                line, = self.ax.plot([], [], color=color,
+                                    label=label, linewidth=1.5,
                                     animated=animated)
                 self.lines[name] = line
 
@@ -663,12 +689,12 @@ class DashboardTab:
         for group_name, params in param_groups.items():
             group_frame = ttk.LabelFrame(scrollable, text=group_name, padding="3")
             group_frame.pack(fill=tk.X, pady=3, padx=2)
-            
+
             for param_name in params:
                 if param_name not in TUNING_PARAMS:
                     continue
-                    
-                pin, desc, min_val, max_val, step, _, _ = TUNING_PARAMS[param_name]
+
+                pin, desc, min_val, max_val, step, _, _ = self._get_param_meta(param_name)
                 
                 frame = ttk.Frame(group_frame)
                 frame.pack(fill=tk.X, pady=2)
@@ -722,10 +748,10 @@ class DashboardTab:
         root.bind('<Escape>', lambda e: self._handle_hotkey(self._stop_spindle), add="+")
 
         # Number keys for speed presets
-        root.bind('1', lambda e: self._handle_hotkey(lambda: self._start_spindle(500)), add="+")
-        root.bind('2', lambda e: self._handle_hotkey(lambda: self._start_spindle(1000)), add="+")
-        root.bind('3', lambda e: self._handle_hotkey(lambda: self._start_spindle(1500)), add="+")
-        root.bind('4', lambda e: self._handle_hotkey(lambda: self._start_spindle(1800)), add="+")
+        root.bind('<KeyPress-1>', lambda e: self._handle_hotkey(lambda: self._start_spindle(500)), add="+")
+        root.bind('<KeyPress-2>', lambda e: self._handle_hotkey(lambda: self._start_spindle(1000)), add="+")
+        root.bind('<KeyPress-3>', lambda e: self._handle_hotkey(lambda: self._start_spindle(1500)), add="+")
+        root.bind('<KeyPress-4>', lambda e: self._handle_hotkey(lambda: self._start_spindle(1800)), add="+")
 
     def _handle_hotkey(self, func):
         """Run a hotkey handler unless focus is on a text entry."""
@@ -745,7 +771,7 @@ class DashboardTab:
         if self.params_locked.get():
             return
         current_val = self.param_vars[param_name].get()
-        _, desc, min_val, max_val, _, _, _ = TUNING_PARAMS[param_name]
+        _, desc, min_val, max_val, _, _, _ = self._get_param_meta(param_name)
         
         new_val = simpledialog.askfloat(
             "Set Parameter", 
@@ -944,7 +970,7 @@ class DashboardTab:
         
         for name, line in self.lines.items():
             if line.get_visible():
-                headers.append(PLOT_TRACES[name]['label'])
+                headers.append(PLOT_TRACES.get(name, {}).get('label', name))
                 ydata = list(line.get_ydata())
                 # Pad with empty if different length
                 while len(ydata) < len(times):
@@ -996,7 +1022,7 @@ class DashboardTab:
     
     def _snap_param(self, param_name: str, value: float) -> float:
         """Snap parameter value to configured step (matches HAL's _clamp_and_snap)."""
-        _, _, min_val, max_val, step, _, _ = TUNING_PARAMS[param_name]
+        _, _, min_val, max_val, step, _, _ = self._get_param_meta(param_name)
         v = max(min_val, min(max_val, value))
         if step and step > 0:
             steps = round((v - min_val) / step)
@@ -1217,7 +1243,7 @@ class DashboardTab:
         self.lbl_error.config(foreground=err_color)
         
         # Direction indicator (use signed feedback_raw for correct CW/CCW detection)
-        fb_raw = values.get('feedback_raw', fb)
+        fb_raw = self._coerce_float(values.get('feedback_raw', fb), default=fb)
         if abs(fb_raw) < 10:
             self.lbl_direction.config(text="STOP", foreground="gray")
         elif fb_raw > 0:
@@ -1271,20 +1297,15 @@ class DashboardTab:
         if not HAS_MATPLOTLIB or self.canvas is None:
             return
         
-        times, cmd, feedback, error, errorI = self.logger.get_plot_data()
+        times, trace_data = self.logger.get_plot_data()
 
         if times is None or len(times) == 0:
             return
         
         # Update line data
-        if 'cmd' in self.lines:
-            self.lines['cmd'].set_data(times, cmd)
-        if 'feedback' in self.lines:
-            self.lines['feedback'].set_data(times, feedback)
-        if 'error' in self.lines:
-            self.lines['error'].set_data(times, error)
-        if 'errorI' in self.lines:
-            self.lines['errorI'].set_data(times, errorI)
+        for name, line in self.lines.items():
+            series = trace_data.get(name, [])
+            line.set_data(times, series)
         
         # Check if we need a full redraw (axis shift, resize, etc.)
         time_scale = self.time_scale.get()
@@ -1358,7 +1379,7 @@ class DashboardTab:
                                 if line.get_visible()]
                 if visible_lines:
                     self.ax.legend([l for _, l in visible_lines],
-                                  [PLOT_TRACES[n]['label'] for n, _ in visible_lines],
+                                  [PLOT_TRACES.get(n, {}).get('label', n) for n, _ in visible_lines],
                                   loc='upper right', fontsize=8, framealpha=0.5)
                 elif self.ax.get_legend():
                     self.ax.get_legend().remove()
@@ -1413,20 +1434,14 @@ class DashboardTab:
 
         lines = [
             "╭" + "─" * inner_width + "╮",
-            f"│ {header:^{inner_width}} │",
-            divider,
-            row(
-                column("Command", values.get('cmd_limited', 0), "RPM", "{:.0f}"),
-                column("Error", values.get('error', 0), "RPM", "{:+.1f}"),
-            ),
-            row(
-                column("Feedback", values.get('feedback', 0), "RPM", "{:.0f}"),
-                column("PID Output", values.get('output', 0), "", "{:+.1f}"),
-            ),
-            row(
-                column("Integrator", values.get('errorI', 0), "", "{:+.1f}"),
-                column("Revs", values.get('spindle_revs', 0), "rev", "{:.2f}"),
-            ),
+            f"│ {'SPINDLE TELEMETRY':^{inner_width}} │",
+            "├" + "─" * (label_width + 1) + "┬" + "─" * (inner_width - label_width - 1) + "┤",
+            metric_line("Command", self._coerce_float(values.get('cmd_limited', 0)), "RPM", "{:.0f}"),
+            metric_line("Feedback", self._coerce_float(values.get('feedback', 0)), "RPM", "{:.0f}"),
+            metric_line("Error", self._coerce_float(values.get('error', 0)), "RPM", "{:.1f}"),
+            metric_line("Integrator", self._coerce_float(values.get('errorI', 0)), "", "{:.1f}"),
+            metric_line("PID Output", self._coerce_float(values.get('output', 0)), "", "{:.1f}"),
+            metric_line("Revs", self._coerce_float(values.get('spindle_revs', 0)), "rev", "{:.2f}"),
             "├" + "─" * inner_width + "┤",
             f"│ {'Time: ' + time.strftime('%H:%M:%S'):<{inner_width}} │",
             "╰" + "─" * inner_width + "╯",

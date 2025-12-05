@@ -17,7 +17,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Deque, Dict, List, Optional, Sequence, Tuple
 
-from config import UPDATE_INTERVAL_MS, HISTORY_DURATION_S
+from config import UPDATE_INTERVAL_MS, HISTORY_DURATION_S, PLOT_TRACES
 
 log = logging.getLogger(__name__)
 
@@ -84,10 +84,9 @@ class DataLogger:
 
         # Circular buffers for plotting (time-limited)
         self.time_buffer: Deque[float] = deque(maxlen=self.buffer_size)
-        self.cmd_buffer: Deque[float] = deque(maxlen=self.buffer_size)
-        self.feedback_buffer: Deque[float] = deque(maxlen=self.buffer_size)
-        self.error_buffer: Deque[float] = deque(maxlen=self.buffer_size)
-        self.errorI_buffer: Deque[float] = deque(maxlen=self.buffer_size)
+        self.trace_buffers: Dict[str, Deque[float]] = {
+            name: deque(maxlen=self.buffer_size) for name in PLOT_TRACES
+        }
 
         # Full session recording (unlimited, for export)
         self.recording: bool = True
@@ -118,16 +117,11 @@ class DataLogger:
 
             relative_time = now_mono - self._start_time_mono
 
-            cmd_limited = self._safe_float(values.get("cmd_limited", 0.0))
-            feedback = self._safe_float(values.get("feedback", 0.0))
-            error = self._safe_float(values.get("error", 0.0))
-            errorI = self._safe_float(values.get("errorI", 0.0))
-
             self.time_buffer.append(relative_time)
-            self.cmd_buffer.append(cmd_limited)
-            self.feedback_buffer.append(feedback)
-            self.error_buffer.append(error)
-            self.errorI_buffer.append(errorI)
+            for name in list(self.trace_buffers):
+                self.trace_buffers[name].append(
+                    self._safe_float(values.get(name, 0.0))
+                )
 
             if not self.recording:
                 return
@@ -137,40 +131,40 @@ class DataLogger:
                     timestamp=now_epoch,
                     relative_time=relative_time,
                     cmd_raw=self._safe_float(values.get("cmd_raw", 0.0)),
-                    cmd_limited=cmd_limited,
-                    feedback=feedback,
-                    error=error,
-                    errorI=errorI,
+                    cmd_limited=self._safe_float(values.get("cmd_limited", 0.0)),
+                    feedback=self._safe_float(values.get("feedback", 0.0)),
+                    error=self._safe_float(values.get("error", 0.0)),
+                    errorI=self._safe_float(values.get("errorI", 0.0)),
                     output=self._safe_float(values.get("output", 0.0)),
                     at_speed=values.get("at_speed", 0.0) > 0.5,
                 )
             )
 
-    def get_plot_data(self) -> Tuple[List[float], List[float], List[float], List[float], List[float]]:
+    def get_plot_data(self) -> Tuple[List[float], Dict[str, List[float]]]:
         """Get a copy of time-series buffers for plotting (thread-safe)."""
         with self._lock:
             return (
                 list(self.time_buffer),
-                list(self.cmd_buffer),
-                list(self.feedback_buffer),
-                list(self.error_buffer),
-                list(self.errorI_buffer),
+                {name: list(buf) for name, buf in self.trace_buffers.items()},
             )
 
     def clear_buffers(self) -> None:
         """Clear all plot buffers without altering the session clock."""
         with self._lock:
             self.time_buffer.clear()
-            self.cmd_buffer.clear()
-            self.feedback_buffer.clear()
-            self.error_buffer.clear()
-            self.errorI_buffer.clear()
+            for buf in self.trace_buffers.values():
+                buf.clear()
 
     def clear_recording(self) -> None:
         """Clear recorded data (export history) and reset timing."""
         with self._lock:
             self.recorded_data.clear()
             self._start_time_mono = None
+            self.time_buffer.clear()
+            self.cmd_buffer.clear()
+            self.feedback_buffer.clear()
+            self.error_buffer.clear()
+            self.errorI_buffer.clear()
 
     def set_recording(self, enabled: bool) -> None:
         """Enable or disable data recording."""
@@ -202,35 +196,39 @@ class DataLogger:
                 return False
             data_copy = list(self.recorded_data)
 
-        filepath.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            filepath.parent.mkdir(parents=True, exist_ok=True)
 
-        with filepath.open("w", newline="", encoding="utf-8") as f:
-            writer = csv.writer(f)
+            with filepath.open("w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
 
-            if metadata:
-                writer.writerow(["# Metadata"])
-                for k, v in metadata.items():
-                    writer.writerow([f"# {k}", v])
-                writer.writerow([])  # spacer
+                if metadata:
+                    writer.writerow(["# Metadata"])
+                    for k, v in metadata.items():
+                        writer.writerow([f"# {k}", v])
+                    writer.writerow([])  # spacer
 
-            writer.writerow(
-                [
-                    "timestamp_iso",
-                    "time_s",
-                    "cmd_raw",
-                    "cmd_limited",
-                    "feedback",
-                    "error",
-                    "errorI",
-                    "output",
-                    "at_speed",
-                ]
-            )
+                writer.writerow(
+                    [
+                        "timestamp_iso",
+                        "time_s",
+                        "cmd_raw",
+                        "cmd_limited",
+                        "feedback",
+                        "error",
+                        "errorI",
+                        "output",
+                        "at_speed",
+                    ]
+                )
 
-            for point in data_copy:
-                writer.writerow(point.to_csv_row())
+                for point in data_copy:
+                    writer.writerow(point.to_csv_row())
 
-        return True
+            return True
+        except OSError as exc:
+            log.error("Failed to export CSV to %s: %s", filepath, exc)
+            return False
 
     # ---------------------------------------------------------------------
     # Metrics helpers
@@ -272,13 +270,15 @@ class DataLogger:
         metrics = PerformanceMetrics()
         step_size = end_rpm - start_rpm
         if abs(step_size) < 10:
+            metrics.rise_time_s = -1.0
+            metrics.settling_time_s = -1.0
             return metrics
 
         # Ensure monotonic ordering (robust against duplicates / slight disorder).
         def _get_value(point: Any, key: str, default: float = 0.0) -> float:
             if isinstance(point, dict):
-                return float(point.get(key, default))
-            return float(getattr(point, key, default))
+                return self._safe_float(point.get(key, default), default)
+            return self._safe_float(getattr(point, key, default), default)
 
         data = sorted(test_data, key=lambda p: _get_value(p, "relative_time", 0.0))
         step_start_time = _get_value(data[0], "relative_time", 0.0)
@@ -413,8 +413,11 @@ class DataLogger:
             return self._safe_float(getattr(point, key, default), default)
 
         # Find point with largest deviation from target RPM
+        sorted_data = sorted(test_data, key=lambda p: _get_value(p, 0, 0.0))
+
         max_dev_idx, max_dev_point = max(
-            enumerate(test_data), key=lambda x: abs(_get_value(x[1], 1, target_rpm) - target_rpm)
+            enumerate(sorted_data),
+            key=lambda x: abs(_get_value(x[1], 1, target_rpm) - target_rpm),
         )
         max_dev_time = _get_value(max_dev_point, 0, 0.0)
         max_dev_rpm = _get_value(max_dev_point, 1, target_rpm)
@@ -423,7 +426,7 @@ class DataLogger:
             return metrics
 
         recovery_band = 20.0
-        for point in test_data[max_dev_idx:]:
+        for point in sorted_data[max_dev_idx:]:
             t = _get_value(point, 0, max_dev_time)
             rpm = _get_value(point, 1, target_rpm)
 
