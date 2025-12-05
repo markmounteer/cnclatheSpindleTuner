@@ -674,7 +674,12 @@ class HalInterface:
             return self._mock_values.get(pin_name, 0.0)
 
     def _update_mock_values(self):
-        """Update mock physics at most once per configured interval."""
+        """
+        Update mock physics at most once per configured interval.
+
+        Note: Caller MUST hold self._lock before calling this method.
+        This method is not thread-safe on its own.
+        """
         if not self._physics_engine:
             return
 
@@ -777,26 +782,29 @@ class HalInterface:
 
         # Parse results - with -s flag, each getp outputs exactly one line
         # If a pin doesn't exist, halcmd prints an error to stderr and
-        # may skip that output line, so we handle mismatched counts gracefully
+        # may skip that output line. When this happens, we cannot reliably
+        # map output lines to pins since we don't know which pin failed.
+        # Fall back to individual reads for safety.
         if len(lines) != len(pin_list):
             logger.debug(
-                f"Bulk read got {len(lines)} lines for {len(pin_list)} pins "
-                f"(some pins may not exist)"
+                f"Bulk read got {len(lines)} lines for {len(pin_list)} pins - "
+                f"falling back to individual reads to avoid misalignment"
             )
+            # Fall back to individual reads for ALL pins to avoid wrong mapping
+            for pin in pin_list:
+                values[pin] = self._read_hal_pin(pin)
+            return values
 
         for idx, line in enumerate(lines):
-            if idx >= len(pin_list):
-                break
             pin = pin_list[idx]
             try:
                 values[pin] = self._parse_hal_value(line.strip())
             except ValueError as e:
                 logger.error(f"Invalid value for {pin} in bulk read: {e}")
+                # Fall back to individual read for this pin
+                values[pin] = self._read_hal_pin(pin)
             except Exception as e:
                 logger.error(f"Error parsing bulk value for {pin}: {e}")
-
-        if len(lines) < len(pin_list):
-            for pin in pin_list[len(lines):]:
                 values[pin] = self._read_hal_pin(pin)
 
         if values:
@@ -870,7 +878,12 @@ class HalInterface:
                     BASELINE_PARAMS.get(param_name, 0.0)
                 )
 
-        pin_name = TUNING_PARAMS[param_name][0] if TUNING_PARAMS[param_name] else ''
+        meta = TUNING_PARAMS[param_name]
+        if not meta or not meta[0]:
+            logger.warning(f"No HAL pin configured for parameter: {param_name}")
+            return BASELINE_PARAMS.get(param_name, 0.0)
+
+        pin_name = meta[0]
         return self.get_pin_value(pin_name, use_cache=False)
     
     def get_all_params(self) -> Dict[str, float]:
@@ -942,7 +955,11 @@ class HalInterface:
 
         try:
             meta = TUNING_PARAMS[param_name]
-            pin_name = meta[0] if meta else ''
+            if not meta or not meta[0]:
+                logger.error(f"No HAL pin configured for parameter: {param_name}")
+                return False
+
+            pin_name = meta[0]
             result = self._run_halcmd(['setp', pin_name, str(value)], timeout=2.0)
             
             if result.returncode == 0:
@@ -1028,7 +1045,12 @@ class HalInterface:
                 min_val, max_val, step = self._get_param_bounds(param_name)
                 value = self._clamp_and_snap(value, min_val, max_val, step)
 
-                pin_name = TUNING_PARAMS[param_name][0] if TUNING_PARAMS[param_name] else ''
+                meta = TUNING_PARAMS[param_name]
+                if not meta or not meta[0]:
+                    logger.warning(f"No HAL pin configured for parameter: {param_name}")
+                    continue
+
+                pin_name = meta[0]
                 commands.append(f"setp {pin_name} {value}")
 
             if not commands:
@@ -1049,8 +1071,9 @@ class HalInterface:
                 with self._lock:
                     for param_name in params:
                         if param_name in TUNING_PARAMS:
-                            pin_name = TUNING_PARAMS[param_name][0] if TUNING_PARAMS[param_name] else ''
-                            self._cache.pop(pin_name, None)
+                            meta = TUNING_PARAMS[param_name]
+                            if meta and meta[0]:
+                                self._cache.pop(meta[0], None)
 
                 logger.info(f"Bulk set {len(commands)} params")
                 return True
