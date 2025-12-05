@@ -157,7 +157,7 @@ class DashboardTab:
         self.ax = None
         self.ax2 = None  # Secondary y-axis for error
         self.canvas = None
-        self.lines: Dict[str, Line2D] = {}
+        self.lines: Dict[str, "Line2D"] = {}  # String annotation for conditional import
         self.plot_paused = False
         self.time_scale = tk.IntVar(value=HISTORY_DURATION_S)
         self.dual_axis = tk.BooleanVar(value=False)
@@ -1273,13 +1273,13 @@ class DashboardTab:
                 err_data = []
                 
                 for name in ['cmd', 'feedback']:
-                    if name in self.lines and self.show_traces.get(name, tk.BooleanVar(value=True)).get():
+                    if name in self.lines and name in self.show_traces and self.show_traces[name].get():
                         data = self.lines[name].get_ydata()
                         if len(data) > 0:
                             rpm_data.extend(data)
-                
+
                 for name in ['error', 'errorI']:
-                    if name in self.lines and self.show_traces.get(name, tk.BooleanVar(value=True)).get():
+                    if name in self.lines and name in self.show_traces and self.show_traces[name].get():
                         data = self.lines[name].get_ydata()
                         if len(data) > 0:
                             err_data.extend(data)
@@ -1297,7 +1297,7 @@ class DashboardTab:
                 # Single axis scaling
                 all_data = []
                 for name, line in self.lines.items():
-                    if self.show_traces.get(name, tk.BooleanVar(value=True)).get():
+                    if name in self.show_traces and self.show_traces[name].get():
                         data = line.get_ydata()
                         if len(data) > 0:
                             all_data.extend(data)
