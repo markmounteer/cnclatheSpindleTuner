@@ -7,8 +7,6 @@ Verifies limit2 component enforces command rate limiting.
 import time
 from typing import Optional
 
-import numpy as np
-
 from config import MONITOR_PINS
 from tests.base import BaseTest, TestDescription
 
@@ -160,8 +158,18 @@ during the VFD's ramp time, resulting in overshoot.""",
         limited_ramp = [limited_vals[i] for i in indices]
 
         if len(times_ramp) >= 2:
-            slope, _ = np.polyfit(times_ramp, limited_ramp, 1)
-            observed_rate = abs(slope)
+            x_mean = sum(times_ramp) / len(times_ramp)
+            y_mean = sum(limited_ramp) / len(limited_ramp)
+
+            numerator = sum((x - x_mean) * (y - y_mean) for x, y in zip(times_ramp, limited_ramp))
+            denominator = sum((x - x_mean) ** 2 for x in times_ramp)
+
+            if denominator != 0:
+                slope = numerator / denominator
+                observed_rate = abs(slope)
+            else:
+                observed_rate = 0
+                self.log_result("Error: Zero variance in time data")
         else:
             observed_rate = 0
             self.log_result("Error: Insufficient data for rate calculation")
