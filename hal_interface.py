@@ -76,13 +76,6 @@ if IS_WINDOWS:
 # =============================================================================
 
 try:
-    import hal as hal_module
-    HAS_HAL_MODULE = True
-except ImportError:
-    HAS_HAL_MODULE = False
-    hal_module = None
-
-try:
     import linuxcnc
     HAS_LINUXCNC = True
 except ImportError:
@@ -679,7 +672,6 @@ class HalInterface:
                 'is_windows': IS_WINDOWS,
                 'is_linux': IS_LINUX,
                 'has_halcmd': HAS_HALCMD,
-                'has_hal_module': HAS_HAL_MODULE,
                 'has_linuxcnc': HAS_LINUXCNC,
                 'connect_attempts': self._connect_attempts,
                 'last_error': self._last_error,
@@ -811,7 +803,7 @@ class HalInterface:
         """
         Read multiple pins in a single halcmd invocation.
 
-        Uses 'getp' commands fed via stdin to a single halcmd process.
+        Uses 'getp'/'gets' commands fed via stdin to a single halcmd process.
         This is more reliable than 'show pin' which has variable output
         format (connected pins include arrows and signal names).
         """
@@ -823,16 +815,49 @@ class HalInterface:
         # Deduplicate while preserving order
         pin_list = list(dict.fromkeys(pin_names))
 
-        # Build accessor commands - one per line, fed via stdin
-        # Using -s flag for terse (single value) output per command
-        commands = []
+        # Resolve accessors for unknown pins up front so signals don't get stuck
+        # behind repeated getp failures in bulk mode.
+        pending_bulk: List[Tuple[str, str]] = []
         for pin in pin_list:
-            accessor = self._get_cached_accessor(pin) or 'getp'
-            commands.append(f"{accessor} {pin}")
+            accessor = self._get_cached_accessor(pin)
+            if accessor:
+                pending_bulk.append((pin, accessor))
+                continue
+
+            # Attempt a single read to learn the correct accessor and cache it.
+            val, ok = self._read_hal_pin(pin)
+            if ok:
+                values[pin] = val
+                continue
+
+            # Still unknown: fall back to getp for bulk attempt; we'll retry
+            # individually if it fails.
+            pending_bulk.append((pin, 'getp'))
+
+        if not pending_bulk:
+            return values
+
+        commands = [f"{accessor} {pin}" for pin, accessor in pending_bulk]
         cmd_str = "\n".join(commands)
 
+        def _fallback_individual_reads() -> Dict[str, float]:
+            for pin, _ in pending_bulk:
+                # Skip pins already resolved above
+                if pin in values:
+                    continue
+                val, ok = self._read_hal_pin(pin)
+                if not ok:
+                    continue
+                values[pin] = val
+            if values:
+                with self._lock:
+                    now = time.monotonic()
+                    for pin, val in values.items():
+                        self._cache[pin] = CachedValue(val, now)
+            return values
+
         try:
-            timeout = max(2.0, len(pin_list) * 0.15)
+            timeout = max(2.0, len(pending_bulk) * 0.15)
             result = subprocess.run(
                 [self._halcmd_path, '-s'],
                 input=cmd_str,
@@ -854,19 +879,6 @@ class HalInterface:
 
         lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
 
-        def _fallback_individual_reads() -> Dict[str, float]:
-            for pin in pin_list:
-                val, ok = self._read_hal_pin(pin)
-                if not ok:
-                    continue
-                values[pin] = val
-            if values:
-                with self._lock:
-                    now = time.monotonic()
-                    for pin, val in values.items():
-                        self._cache[pin] = CachedValue(val, now)
-            return values
-
         if result.stderr.strip():
             logger.warning(
                 "halcmd bulk read returned stderr; falling back to per-pin reads: "
@@ -874,16 +886,16 @@ class HalInterface:
             )
             return _fallback_individual_reads()
 
-        # Parse results - with -s flag, each getp outputs exactly one line
+        # Parse results - with -s flag, each accessor outputs exactly one line
         # If a pin doesn't exist, halcmd prints an error to stderr and
         # may skip that output line. When this happens, we cannot reliably
         # map output lines to pins since we don't know which pin failed.
-        if len(lines) != len(pin_list):
+        if len(lines) != len(pending_bulk):
             # Line count mismatch - positional mapping is unsafe, fall back
             # to individual reads
             logger.debug(
                 f"Bulk read output mismatch ({len(lines)} lines for "
-                f"{len(pin_list)} pins); falling back to individual reads"
+                f"{len(pending_bulk)} pins); falling back to individual reads"
             )
             return _fallback_individual_reads()
 
@@ -891,18 +903,9 @@ class HalInterface:
             parsed_values = [self._parse_hal_value(line.strip()) for line in lines]
         except Exception as e:
             logger.error(f"Failed to parse bulk HAL output: {e}; falling back to individual reads")
-            for pin in pin_list:
-                val, ok = self._read_hal_pin(pin)
-                if ok:
-                    values[pin] = val
-            if values:
-                with self._lock:
-                    now = time.monotonic()
-                    for pin, val in values.items():
-                        self._cache[pin] = CachedValue(val, now)
-            return values
+            return _fallback_individual_reads()
 
-        for pin, parsed in zip(pin_list, parsed_values):
+        for (pin, _), parsed in zip(pending_bulk, parsed_values):
             values[pin] = parsed
 
         if values:
@@ -1111,8 +1114,9 @@ class HalInterface:
             params: Dict of parameter names to values
 
         Returns:
-            True if halcmd completes successfully for the provided parameters.
-            Unknown parameters are ignored (with a warning).
+            True if at least one known parameter was set successfully.
+            Unknown parameters are ignored (with a warning). On bulk failure,
+            parameters are retried individually to honor the return contract.
         """
         if not params:
             return True
@@ -1204,13 +1208,24 @@ class HalInterface:
                 for pin_name in attempted_pins:
                     self._cache.pop(pin_name, None)
 
+            success = False
+
             if result.returncode == 0:
                 logger.info(f"Bulk set {len(commands)} params")
-                return True
+                success = True
+            else:
+                logger.error(f"halcmd bulk set failed: {result.stderr}")
 
-            logger.error(f"halcmd bulk set failed: {result.stderr}")
-            return False
-                
+                # Retry individually so callers can still succeed if some params
+                # were applied before the bulk failure.
+                for param_name, value in params.items():
+                    if param_name not in TUNING_PARAMS:
+                        continue
+                    if self.set_param(param_name, value):
+                        success = True
+
+            return success
+
         except subprocess.TimeoutExpired:
             logger.error("Timeout during bulk param set")
             return False
@@ -1661,7 +1676,7 @@ class IniFileHandler:
                 "AT_SPEED_TOLERANCE = 20",
                 "",
                 "# DPLL Configuration (for low-speed accuracy)",
-                "DPLL_TIMER_US = -100",
+                "DPLL_TIMER_US = 100",
             ])
         
         return '\n'.join(lines)

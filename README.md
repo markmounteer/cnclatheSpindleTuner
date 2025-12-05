@@ -252,7 +252,7 @@ Baseline parameters from Tuning Guide v5.3:
 |------|-------|
 | Counts/Rev | 4096 (quadrature) |
 | Type | Differential |
-| DPLL Timer | -100 µs |
+| DPLL Timer | +100 µs |
 
 ---
 
