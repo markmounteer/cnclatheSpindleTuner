@@ -5,7 +5,6 @@ Multi-speed encoder accuracy and polarity verification.
 """
 
 import time
-import threading
 
 from config import MONITOR_PINS
 from tests.base import BaseTest, TestDescription, TARGETS
@@ -72,7 +71,7 @@ identify configuration issues.""",
         """Start encoder verification in background thread."""
         if not self.start_test():
             return
-        threading.Thread(target=self._sequence, daemon=True).start()
+        self.run_sequence(self._sequence)
 
     def _sequence(self):
         """Execute encoder verification."""

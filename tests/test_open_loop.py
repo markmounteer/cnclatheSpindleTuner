@@ -5,7 +5,6 @@ Measures motor slip with feedforward only (no PID correction).
 """
 
 import time
-import threading
 
 from config import MONITOR_PINS, MOTOR_SPECS
 from tests.base import BaseTest, TestDescription
@@ -72,7 +71,7 @@ motor, 3-4% for hot motor) which the PID I-term must compensate.""",
         """Start open loop check in background thread."""
         if not self.start_test():
             return
-        threading.Thread(target=self._sequence, daemon=True).start()
+        self.run_sequence(self._sequence)
 
     def _sequence(self):
         """Execute open loop check."""

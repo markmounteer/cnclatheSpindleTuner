@@ -5,7 +5,6 @@ Monitors steady-state accuracy and thermal drift over time.
 """
 
 import time
-import threading
 
 from config import MONITOR_PINS
 from tests.base import BaseTest, TestDescription, TARGETS
@@ -90,7 +89,7 @@ motor heats up and slip increases.""",
         if not self.start_test():
             return
 
-        threading.Thread(target=self._sequence, daemon=True).start()
+        self.run_sequence(self._sequence)
 
     def _sequence(self):
         """Execute steady-state monitoring."""

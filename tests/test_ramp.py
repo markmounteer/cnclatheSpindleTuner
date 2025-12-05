@@ -5,7 +5,6 @@ Tests complete 0->1800->0 RPM cycle.
 """
 
 import time
-import threading
 
 from config import MONITOR_PINS
 from tests.base import BaseTest, TestDescription
@@ -77,7 +76,7 @@ Use this to verify tuning across the full operating range.""",
         """Start full ramp test in background thread."""
         if not self.start_test():
             return
-        threading.Thread(target=self._sequence, daemon=True).start()
+        self.run_sequence(self._sequence)
 
     def _sequence(self):
         """Execute full ramp test."""

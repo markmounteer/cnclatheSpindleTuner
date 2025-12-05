@@ -5,7 +5,6 @@ Verifies forward (M3) spindle operation with PID active.
 """
 
 import time
-import threading
 
 from config import MONITOR_PINS
 from tests.base import BaseTest, TestDescription
@@ -68,7 +67,7 @@ Run this test after open-loop check to confirm PID is working.""",
         """Start forward PID test in background thread."""
         if not self.start_test():
             return
-        threading.Thread(target=self._sequence, daemon=True).start()
+        self.run_sequence(self._sequence)
 
     def _sequence(self):
         """Execute forward PID test."""
