@@ -5,6 +5,7 @@ Runs an abbreviated sequence of all major tests.
 """
 
 import time
+from typing import Dict, Optional, List, Tuple
 
 try:
     from tkinter import messagebox
@@ -22,11 +23,11 @@ class FullSuiteTest(BaseTest):
     TEST_NAME = "Full Test Suite"
     GUIDE_REF = ""
 
-    def __init__(self, *args, test_instances: dict = None, **kwargs):
+    def __init__(self, *args, test_instances: Optional[Dict[str, BaseTest]] = None, **kwargs):
         super().__init__(*args, **kwargs)
         self.test_instances = test_instances or {}
 
-    def set_test_instances(self, instances: dict):
+    def set_test_instances(self, instances: Dict[str, BaseTest]):
         """Set the test instances to run."""
         self.test_instances = instances
 
@@ -88,25 +89,30 @@ tuning configuration in about 2 minutes.""",
         if not self.start_test():
             return
 
-        if not messagebox.askyesno(
-            "Full Test Suite",
-            "This will run a sequence of tests:\n\n"
-            "1. Signal Chain Check\n"
-            "2. Open Loop Test\n"
-            "3. Forward PID Test\n"
-            "4. Step Response\n\n"
-            "Total time: ~2 minutes\n\n"
-            "Continue?"):
-            self.end_test()
-            return
+        # UI Confirmation (Only if GUI is available)
+        if _HAS_TKINTER and messagebox:
+            if not messagebox.askyesno(
+                "Full Test Suite",
+                "This will run a sequence of tests:\n\n"
+                "1. Signal Chain Check\n"
+                "2. Open Loop Test\n"
+                "3. Forward PID Test\n"
+                "4. Step Response\n\n"
+                "Total time: ~2 minutes\n\n"
+                "Continue?"
+            ):
+                self.end_test()
+                return
 
+        # If no GUI, we assume automated run and proceed
         self.run_sequence(self._sequence)
 
     def _sequence(self):
         """Execute full test suite."""
         self.log_header()
+        self.log_result("Starting Full Diagnostic Suite...")
 
-        tests = [
+        tests: List[Tuple[str, str]] = [
             ("Signal Chain", "signal_chain"),
             ("Open Loop", "open_loop"),
             ("Forward PID", "forward"),
@@ -116,48 +122,74 @@ tuning configuration in about 2 minutes.""",
         total = len(tests)
         passed = 0
         failed = 0
+        skipped = 0
 
         for i, (name, key) in enumerate(tests):
+            # 1. Check for Abort Request
             if self.test_abort:
-                self.log_result(f"\n>>> Suite aborted at {name}")
+                self.log_result(f"\n>>> Suite aborted by user before {name}")
+                skipped = total - i
                 break
 
+            # 2. Update Progress
             progress = (i / total) * 90
             self.update_progress(progress, f"Running {name}...")
-            self.log_result(f"\n>>> Running {name} <<<")
 
+            # Visual separator for logs
+            self.log_result(f"\n{'-'*40}")
+            self.log_result(f"TEST {i+1}/{total}: {name}")
+            self.log_result(f"{'-'*40}")
+
+            # 3. Retrieve Test Instance
             test_instance = self.test_instances.get(key)
-            if test_instance:
-                # Run the test's internal sequence directly
-                test_instance.test_running = True
-                test_instance.test_abort = False
-                try:
-                    test_instance._sequence()
-                    passed += 1
-                except Exception as e:
-                    self.log_result(f"  ERROR: {e}")
-                    failed += 1
-                test_instance.test_running = False
-            else:
-                self.log_result(f"  Test not available: {key}")
-                failed += 1
 
+            if not test_instance:
+                self.log_result(f"  ERROR: Test module '{key}' not found/initialized.")
+                failed += 1
+                continue
+
+            # 4. Execute Sub-Test
+            # We manually set state to simulate the test running without triggering
+            # its individual UI start/stop events (popups).
+            test_instance.test_running = True
+            test_instance.test_abort = False  # Reset abort state for the specific test
+
+            try:
+                # Run the internal sequence of the sub-test
+                test_instance._sequence()
+                passed += 1
+                self.log_result(f"  > {name}: COMPLETED")
+            except Exception as e:
+                self.log_result(f"  > {name}: FAILED with error: {str(e)}")
+                failed += 1
+            finally:
+                # Crucial: Ensure the sub-test flag is reset even if it crashes
+                test_instance.test_running = False
+
+            # Propagate abort signal to sub-test if user requested abort
+            if self.test_abort:
+                test_instance.test_abort = True
+
+            # Small pause between tests for machine settling
             time.sleep(1.0)
 
+        # 5. Final Summary
         self.update_progress(100, "Suite complete")
 
         self.log_result(f"\n{'='*50}")
         self.log_result("FULL SUITE SUMMARY")
-        self.log_result("="*50)
-        self.log_result(f"  Tests run: {passed + failed}")
-        self.log_result(f"  Passed: {passed}")
-        self.log_result(f"  Failed/Skipped: {failed}")
+        self.log_result("=" * 50)
+        self.log_result(f"  Total Tests:  {total}")
+        self.log_result(f"  Passed:       {passed}")
+        self.log_result(f"  Failed:       {failed}")
+        if skipped > 0:
+            self.log_result(f"  Skipped:      {skipped}")
 
-        if failed == 0 and not self.test_abort:
+        if self.test_abort:
+            self.log_footer("SUITE ABORTED")
+        elif failed == 0:
             self.log_footer("ALL TESTS PASSED")
-        elif self.test_abort:
-            self.log_footer("ABORTED")
         else:
-            self.log_footer(f"{failed} ISSUES")
+            self.log_footer(f"COMPLETED WITH {failed} ERRORS")
 
         self.end_test()
