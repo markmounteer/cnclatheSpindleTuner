@@ -247,12 +247,18 @@ class DataLogger:
         if settling_time is not None:
             metrics.settling_time_s = settling_time
         
-        # Calculate overshoot
+        # Calculate overshoot (handles accel and decel steps)
         peak_rpm = max(rpm for _, rpm in test_data)
+        min_rpm = min(rpm for _, rpm in test_data)
+
+        overshoot = 0.0
         if step_size > 0:
             overshoot = peak_rpm - end_rpm
-            if overshoot > 0:
-                metrics.overshoot_pct = (overshoot / step_size) * 100
+        elif step_size < 0:
+            overshoot = end_rpm - min_rpm
+
+        if overshoot > 0:
+            metrics.overshoot_pct = (overshoot / abs(step_size)) * 100
         
         # Calculate max error
         errors = [abs(rpm - end_rpm) for _, rpm in test_data[-50:]]  # Last ~5 seconds
