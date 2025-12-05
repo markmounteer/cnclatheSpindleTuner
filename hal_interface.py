@@ -443,14 +443,14 @@ class HalInterface:
         self._lock = threading.RLock()
         self._cache: Dict[str, CachedValue] = {}
         self._validated_pins: set = set()
+        self._pin_access_mode: Dict[str, str] = {}
         
         # Connection state
         self._state = ConnectionState.DISCONNECTED
         self._last_error: Optional[str] = None
         self._connect_attempts = 0
-        
+
         # LinuxCNC interfaces
-        self._hal_component = None
         self._linuxcnc_cmd = None
         self._linuxcnc_stat = None
         
@@ -462,6 +462,7 @@ class HalInterface:
         self._mock_last_update_mono: float = 0.0
         self._mock_update_interval = UPDATE_INTERVAL_MS / 1000.0
         self._forced_mock = False
+        self._mock_fallback_active = False
         
         # Performance tracking
         self._read_times: List[float] = []
@@ -493,7 +494,7 @@ class HalInterface:
     @property
     def is_mock(self) -> bool:
         """Check if running in mock mode."""
-        return self._state == ConnectionState.MOCK
+        return self._state == ConnectionState.MOCK or self._mock_fallback_active
     
     @property
     def is_connected(self) -> bool:
@@ -544,10 +545,16 @@ class HalInterface:
     # Connection Management
     # -------------------------------------------------------------------------
     
-    def _init_mock_mode(self):
+    def _init_mock_mode(self, preserve_state: bool = False):
         """Initialize mock mode."""
         logger.info("Initializing mock mode")
-        self._state = ConnectionState.MOCK
+
+        if preserve_state:
+            self._mock_fallback_active = True
+        else:
+            self._state = ConnectionState.MOCK
+            self._mock_fallback_active = False
+
         self._physics_engine = MockPhysicsEngine(self._mock_state, self._physics_params)
         self._mock_last_update_mono = 0.0
     
@@ -606,7 +613,7 @@ class HalInterface:
                 logger.error(self._last_error)
                 self._state = ConnectionState.ERROR
                 # Fall back to mock mode
-                self._init_mock_mode()
+                self._init_mock_mode(preserve_state=True)
                 return False
 
             try:
@@ -625,6 +632,7 @@ class HalInterface:
 
                 # halcmd verification passed - we're connected
                 self._state = ConnectionState.CONNECTED
+                self._mock_fallback_active = False
                 self._last_error = None
                 logger.info("Connected to HAL via halcmd")
                 return True
@@ -635,7 +643,7 @@ class HalInterface:
                 self._state = ConnectionState.ERROR
 
                 # Fall back to mock mode
-                self._init_mock_mode()
+                self._init_mock_mode(preserve_state=True)
                 return False
     
     def reconnect(self) -> bool:
@@ -687,23 +695,24 @@ class HalInterface:
                 cached = self._cache[pin_name]
                 if cached.is_valid(self.CACHE_TTL):
                     return cached.value
-            
+
             # Get value
             if self.is_mock:
-                value = self._get_mock_value(pin_name)
+                value, ok = self._get_mock_value(pin_name)
             else:
-                value = self._read_hal_pin(pin_name)
-            
+                value, ok = self._read_hal_pin(pin_name)
+
             # Update cache
-            self._cache[pin_name] = CachedValue(value, time.monotonic())
-            
+            if ok:
+                self._cache[pin_name] = CachedValue(value, time.monotonic())
+
             return value
-    
-    def _get_mock_value(self, pin_name: str) -> float:
+
+    def _get_mock_value(self, pin_name: str) -> Tuple[float, bool]:
         """Get simulated value for pin. Thread-safe via RLock."""
         with self._lock:
             self._update_mock_values()
-            return self._mock_values.get(pin_name, 0.0)
+            return self._mock_values.get(pin_name, 0.0), True
 
     def _update_mock_values(self):
         """
@@ -747,26 +756,39 @@ class HalInterface:
             raise ValueError(f"Non-finite HAL value: {text.strip()}")
         return val
     
-    def _read_hal_pin(self, pin_name: str) -> float:
-        """Read pin value from real HAL."""
-        try:
-            result = self._run_halcmd(['-s', 'getp', pin_name], timeout=1.0)
-            
-            if result.returncode == 0:
-                return self._parse_hal_value(result.stdout)
-            else:
-                logger.warning(f"halcmd error for {pin_name}: {result.stderr}")
-                return 0.0
-                
-        except subprocess.TimeoutExpired:
-            logger.error(f"Timeout reading {pin_name}")
-            return 0.0
-        except ValueError as e:
-            logger.error(f"Invalid value for {pin_name}: {e}")
-            return 0.0
-        except Exception as e:
-            logger.error(f"Error reading {pin_name}: {e}")
-            return 0.0
+    def _get_cached_accessor(self, pin_name: str) -> Optional[str]:
+        with self._lock:
+            return self._pin_access_mode.get(pin_name)
+
+    def _read_hal_pin(self, pin_name: str) -> Tuple[float, bool]:
+        """Read pin or signal value from real HAL."""
+        accessors = [self._get_cached_accessor(pin_name)] if self._get_cached_accessor(pin_name) else []
+        accessors.extend([cmd for cmd in ('getp', 'gets') if cmd not in accessors])
+
+        for cmd in accessors:
+            try:
+                result = self._run_halcmd(['-s', cmd, pin_name], timeout=1.0)
+
+                if result.returncode != 0:
+                    logger.warning(f"halcmd {cmd} error for {pin_name}: {result.stderr}")
+                    continue
+
+                value = self._parse_hal_value(result.stdout)
+                with self._lock:
+                    self._pin_access_mode[pin_name] = cmd
+                return value, True
+
+            except subprocess.TimeoutExpired:
+                logger.error(f"Timeout reading {pin_name} via {cmd}")
+                return 0.0, False
+            except ValueError as e:
+                logger.error(f"Invalid value for {pin_name}: {e}")
+                continue
+            except Exception as e:
+                logger.error(f"Error reading {pin_name}: {e}")
+                continue
+
+        return 0.0, False
 
     def _read_hal_pins_bulk(self, pin_names: List[str]) -> Dict[str, float]:
         """
@@ -784,9 +806,12 @@ class HalInterface:
         # Deduplicate while preserving order
         pin_list = list(dict.fromkeys(pin_names))
 
-        # Build getp commands - one per line, fed via stdin
+        # Build accessor commands - one per line, fed via stdin
         # Using -s flag for terse (single value) output per command
-        commands = [f"getp {pin}" for pin in pin_list]
+        commands = []
+        for pin in pin_list:
+            accessor = self._get_cached_accessor(pin) or 'getp'
+            commands.append(f"{accessor} {pin}")
         cmd_str = "\n".join(commands)
 
         try:
@@ -805,17 +830,19 @@ class HalInterface:
             logger.error(f"Error running bulk halcmd: {e}")
             return values
 
-        # Note: halcmd may return non-zero if ANY pin fails, but we still
-        # want to parse successful outputs. Log warning but continue.
-        if result.returncode != 0 and not result.stdout.strip():
-            logger.warning(f"halcmd bulk read failed: {result.stderr}")
-            return values
+        # If halcmd signaled an error, avoid trusting positional mapping
+        if result.returncode != 0:
+            logger.warning(f"halcmd bulk read returned error; falling back: {result.stderr}")
+            return _fallback_individual_reads()
 
         lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
 
         def _fallback_individual_reads() -> Dict[str, float]:
             for pin in pin_list:
-                values[pin] = self._read_hal_pin(pin)
+                val, ok = self._read_hal_pin(pin)
+                if not ok:
+                    continue
+                values[pin] = val
             if values:
                 with self._lock:
                     now = time.monotonic()
@@ -848,7 +875,9 @@ class HalInterface:
         except Exception as e:
             logger.error(f"Failed to parse bulk HAL output: {e}; falling back to individual reads")
             for pin in pin_list:
-                values[pin] = self._read_hal_pin(pin)
+                val, ok = self._read_hal_pin(pin)
+                if ok:
+                    values[pin] = val
             if values:
                 with self._lock:
                     now = time.monotonic()
@@ -1065,7 +1094,7 @@ class HalInterface:
             params: Dict of parameter names to values
 
         Returns:
-            True if at least one known parameter was set successfully.
+            True if halcmd completes successfully for the provided parameters.
             Unknown parameters are ignored (with a warning).
         """
         if not params:
@@ -1345,10 +1374,17 @@ class HalInterface:
                 return True
 
         try:
-            # Use getp - it gives a clear success/failure signal
-            # Unlike 'show pin', getp returns non-zero if pin doesn't exist
-            result = self._run_halcmd(['-s', 'getp', pin_name], timeout=1.0)
-            exists = result.returncode == 0
+            accessors = [self._get_cached_accessor(pin_name)] if self._get_cached_accessor(pin_name) else []
+            accessors.extend([cmd for cmd in ('getp', 'gets') if cmd not in accessors])
+
+            exists = False
+            for cmd in accessors:
+                result = self._run_halcmd(['-s', cmd, pin_name], timeout=1.0)
+                if result.returncode == 0:
+                    exists = True
+                    with self._lock:
+                        self._pin_access_mode[pin_name] = cmd
+                    break
 
             if exists:
                 with self._lock:
@@ -1456,7 +1492,8 @@ class IniFileHandler:
         config = configparser.ConfigParser(
             interpolation=None,  # IMPORTANT: LinuxCNC INIs often contain % signs
             allow_no_value=True,
-            inline_comment_prefixes=('#', ';')
+            inline_comment_prefixes=('#', ';'),
+            strict=False,
         )
         config.optionxform = str  # Preserve case sensitivity
         
