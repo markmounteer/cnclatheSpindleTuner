@@ -20,7 +20,6 @@ Improvements in this version:
 """
 
 import configparser
-import os
 import logging
 import math
 import platform
@@ -121,6 +120,7 @@ class MockState:
     cmd: float = 0.0
     limited_cmd: float = 0.0
     direction: SpindleDirection = SpindleDirection.STOPPED
+    last_direction: SpindleDirection = SpindleDirection.FORWARD
     
     # PID state
     error_i: float = 0.0
@@ -303,13 +303,22 @@ class MockPhysicsEngine:
         filter_gain = max(0.1, min(1.0, filter_gain))
         self.state.rpm_filtered = (self.state.rpm_filtered * (1 - filter_gain) +
                                    (current_rpm + noise) * filter_gain)
-        
+
         # === REVOLUTIONS TRACKING ===
         rps = current_rpm / 60.0
-        # dir_mult: 0 when stopped (no revolution accumulation), else direction sign
-        dir_mult = self.state.direction.value if self.state.direction != SpindleDirection.STOPPED else 0
-        # command_dir: defaults to 1 (forward) when stopped for signed command display
-        command_dir = self.state.direction.value if self.state.direction != SpindleDirection.STOPPED else 1
+        if self.state.direction != SpindleDirection.STOPPED:
+            self.state.last_direction = self.state.direction
+
+        active_direction = self.state.direction
+        if active_direction == SpindleDirection.STOPPED and current_rpm > 1.0:
+            active_direction = self.state.last_direction
+
+        dir_mult = active_direction.value if active_direction != SpindleDirection.STOPPED else 0
+        command_dir = (
+            active_direction.value
+            if active_direction != SpindleDirection.STOPPED
+            else self.state.last_direction.value
+        )
         self.state.revolutions += rps * dt * dir_mult
         
         # === BUILD OUTPUT VALUES ===
@@ -423,6 +432,9 @@ class HalInterface:
         self._physics_params = PhysicsParameters()
         self._physics_engine: Optional[MockPhysicsEngine] = None
         self._mock_values: Dict[str, float] = {}
+        self._mock_last_update_mono: float = 0.0
+        self._mock_update_interval = UPDATE_INTERVAL_MS / 1000.0
+        self._forced_mock = False
         
         # Performance tracking
         self._read_times: List[float] = []
@@ -443,7 +455,9 @@ class HalInterface:
             IS_WINDOWS or
             not HAS_HALCMD
         )
-        
+
+        self._forced_mock = mock or IS_WINDOWS or not HAS_HALCMD
+
         if use_mock:
             self._init_mock_mode()
         else:
@@ -486,12 +500,13 @@ class HalInterface:
         Returns:
             Dict with avg_read_time_ms, max_read_time_ms, sample_count
         """
-        if not self._read_times:
-            return {'avg_read_time_ms': 0.0, 'max_read_time_ms': 0.0, 'sample_count': 0}
-        
-        avg_time = sum(self._read_times) / len(self._read_times) * 1000
-        max_time = max(self._read_times) * 1000
-        
+        with self._lock:
+            if not self._read_times:
+                return {'avg_read_time_ms': 0.0, 'max_read_time_ms': 0.0, 'sample_count': 0}
+
+            avg_time = sum(self._read_times) / len(self._read_times) * 1000
+            max_time = max(self._read_times) * 1000
+
         return {
             'avg_read_time_ms': round(avg_time, 2),
             'max_read_time_ms': round(max_time, 2),
@@ -507,6 +522,7 @@ class HalInterface:
         logger.info("Initializing mock mode")
         self._state = ConnectionState.MOCK
         self._physics_engine = MockPhysicsEngine(self._mock_state, self._physics_params)
+        self._mock_last_update_mono = 0.0
     
     def _run_halcmd(self, args: List[str], *, timeout: float = 1.0) -> subprocess.CompletedProcess:
         """
@@ -537,7 +553,7 @@ class HalInterface:
             # Use 'halcmd show' to verify HAL is running and accessible
             # This command lists components and should always work if HAL is up
             result = self._run_halcmd(['show', 'comp'], timeout=2.0)
-            if result.returncode == 0 and result.stdout.strip():
+            if result.returncode == 0:
                 logger.debug("halcmd verification successful")
                 return True
             else:
@@ -597,7 +613,7 @@ class HalInterface:
     
     def reconnect(self) -> bool:
         """Attempt to reconnect to HAL."""
-        if self._state == ConnectionState.MOCK:
+        if self._state == ConnectionState.MOCK and self._forced_mock:
             return False
         return self._connect()
     
@@ -654,11 +670,18 @@ class HalInterface:
     def _get_mock_value(self, pin_name: str) -> float:
         """Get simulated value for pin. Thread-safe via RLock."""
         with self._lock:
-            # Update physics if needed
-            if self._physics_engine:
-                self._mock_values = self._physics_engine.update()
-
+            self._update_mock_values()
             return self._mock_values.get(pin_name, 0.0)
+
+    def _update_mock_values(self):
+        """Update mock physics at most once per configured interval."""
+        if not self._physics_engine:
+            return
+
+        now = time.monotonic()
+        if (now - self._mock_last_update_mono) >= self._mock_update_interval:
+            self._mock_values = self._physics_engine.update()
+            self._mock_last_update_mono = time.monotonic()
     
     @staticmethod
     def _parse_hal_value(text: str) -> float:
@@ -750,7 +773,7 @@ class HalInterface:
             logger.warning(f"halcmd bulk read failed: {result.stderr}")
             return values
 
-        lines = result.stdout.splitlines()
+        lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
 
         # Parse results - with -s flag, each getp outputs exactly one line
         # If a pin doesn't exist, halcmd prints an error to stderr and
@@ -760,20 +783,21 @@ class HalInterface:
                 f"Bulk read got {len(lines)} lines for {len(pin_list)} pins "
                 f"(some pins may not exist)"
             )
-            # Fall back to individual reads if count doesn't match
-            # This ensures we don't misalign pin names with values
-            return values
 
-        for idx, pin in enumerate(pin_list):
-            line = lines[idx].strip()
-            if not line:
-                continue
+        for idx, line in enumerate(lines):
+            if idx >= len(pin_list):
+                break
+            pin = pin_list[idx]
             try:
-                values[pin] = self._parse_hal_value(line)
+                values[pin] = self._parse_hal_value(line.strip())
             except ValueError as e:
                 logger.error(f"Invalid value for {pin} in bulk read: {e}")
             except Exception as e:
                 logger.error(f"Error parsing bulk value for {pin}: {e}")
+
+        if len(lines) < len(pin_list):
+            for pin in pin_list[len(lines):]:
+                values[pin] = self._read_hal_pin(pin)
 
         if values:
             with self._lock:
@@ -796,9 +820,7 @@ class HalInterface:
         if self.is_mock:
             # Single physics update for all values
             with self._lock:
-                if self._physics_engine:
-                    self._mock_values = self._physics_engine.update()
-
+                self._update_mock_values()
                 for key, pin in MONITOR_PINS.items():
                     values[key] = self._mock_values.get(pin, 0.0)
         else:
@@ -820,10 +842,11 @@ class HalInterface:
 
         # Track performance
         elapsed = time.monotonic() - start_time
-        self._read_times.append(elapsed)
-        if len(self._read_times) > self._max_read_times:
-            self._read_times.pop(0)
-        
+        with self._lock:
+            self._read_times.append(elapsed)
+            if len(self._read_times) > self._max_read_times:
+                self._read_times.pop(0)
+
         return values
     
     def get_param(self, param_name: str) -> float:
@@ -841,10 +864,13 @@ class HalInterface:
             return 0.0
         
         if self.is_mock:
-            return self._mock_state.params.get(param_name, 
-                                               BASELINE_PARAMS.get(param_name, 0.0))
-        
-        pin_name = TUNING_PARAMS[param_name][0]
+            with self._lock:
+                return self._mock_state.params.get(
+                    param_name,
+                    BASELINE_PARAMS.get(param_name, 0.0)
+                )
+
+        pin_name = TUNING_PARAMS[param_name][0] if TUNING_PARAMS[param_name] else ''
         return self.get_pin_value(pin_name, use_cache=False)
     
     def get_all_params(self) -> Dict[str, float]:
@@ -876,6 +902,15 @@ class HalInterface:
             v = min_val + steps * step
             v = max(min_val, min(max_val, v))
         return v
+
+    @staticmethod
+    def _get_param_bounds(param_name: str) -> Tuple[float, float, float]:
+        """Safely extract min, max, and step from TUNING_PARAMS with defaults."""
+        meta = TUNING_PARAMS.get(param_name, [])
+        min_val = meta[2] if len(meta) > 2 else float('-inf')
+        max_val = meta[3] if len(meta) > 3 else float('inf')
+        step = meta[4] if len(meta) > 4 else 0.0
+        return float(min_val), float(max_val), float(step)
     
     def set_param(self, param_name: str, value: float) -> bool:
         """
@@ -893,19 +928,21 @@ class HalInterface:
             return False
         
         # Validate and snap to range/step
-        _, desc, min_val, max_val, step, _, _ = TUNING_PARAMS[param_name]
+        min_val, max_val, step = self._get_param_bounds(param_name)
         original_value = value
         value = self._clamp_and_snap(value, min_val, max_val, step)
         if value != original_value:
             logger.debug(f"Adjusted {param_name} from {original_value} -> {value} (range/step)")
-        
+
         if self.is_mock:
-            self._mock_state.params[param_name] = value
+            with self._lock:
+                self._mock_state.params[param_name] = value
             logger.debug(f"[MOCK] Set {param_name} = {value}")
             return True
-        
+
         try:
-            pin_name = TUNING_PARAMS[param_name][0]
+            meta = TUNING_PARAMS[param_name]
+            pin_name = meta[0] if meta else ''
             result = self._run_halcmd(['setp', pin_name, str(value)], timeout=2.0)
             
             if result.returncode == 0:
@@ -962,17 +999,18 @@ class HalInterface:
                 logger.warning(f"Unknown parameter in bulk set: {name}")
 
         if self.is_mock:
-            for name, value in params.items():
-                if name not in TUNING_PARAMS:
-                    continue
+            with self._lock:
+                for name, value in params.items():
+                    if name not in TUNING_PARAMS:
+                        continue
 
-                _, desc, min_val, max_val, step, _, _ = TUNING_PARAMS[name]
-                clamped_value = self._clamp_and_snap(value, min_val, max_val, step)
-                self._mock_state.params[name] = clamped_value
-                if clamped_value != value:
-                    logger.debug(
-                        f"[MOCK] Adjusted {name} from {value} -> {clamped_value}"
-                    )
+                    min_val, max_val, step = self._get_param_bounds(name)
+                    clamped_value = self._clamp_and_snap(value, min_val, max_val, step)
+                    self._mock_state.params[name] = clamped_value
+                    if clamped_value != value:
+                        logger.debug(
+                            f"[MOCK] Adjusted {name} from {value} -> {clamped_value}"
+                        )
 
             valid_count = len(params) - len(unknown_params)
             logger.debug(f"[MOCK] Bulk set {valid_count} params")
@@ -987,10 +1025,10 @@ class HalInterface:
                     continue
 
                 # Validate and clamp using the same rules as set_param
-                _, desc, min_val, max_val, step, _, _ = TUNING_PARAMS[param_name]
+                min_val, max_val, step = self._get_param_bounds(param_name)
                 value = self._clamp_and_snap(value, min_val, max_val, step)
 
-                pin_name = TUNING_PARAMS[param_name][0]
+                pin_name = TUNING_PARAMS[param_name][0] if TUNING_PARAMS[param_name] else ''
                 commands.append(f"setp {pin_name} {value}")
 
             if not commands:
@@ -1011,7 +1049,7 @@ class HalInterface:
                 with self._lock:
                     for param_name in params:
                         if param_name in TUNING_PARAMS:
-                            pin_name = TUNING_PARAMS[param_name][0]
+                            pin_name = TUNING_PARAMS[param_name][0] if TUNING_PARAMS[param_name] else ''
                             self._cache.pop(pin_name, None)
 
                 logger.info(f"Bulk set {len(commands)} params")
@@ -1068,20 +1106,23 @@ class HalInterface:
     def _mock_mdi(self, command: str) -> bool:
         """Handle MDI commands in mock mode."""
         cmd = command.upper().strip()
-        
+
         if cmd == 'M5':
-            self._mock_state.cmd = 0.0
-            self._mock_state.direction = SpindleDirection.STOPPED
+            with self._lock:
+                self._mock_state.cmd = 0.0
+                self._mock_state.direction = SpindleDirection.STOPPED
             logger.debug("[MOCK] Spindle STOP")
-            
+
         elif cmd.startswith('M3'):
-            self._mock_state.direction = SpindleDirection.FORWARD
-            self._mock_state.cmd = self._parse_speed(cmd)
+            with self._lock:
+                self._mock_state.direction = SpindleDirection.FORWARD
+                self._mock_state.cmd = self._parse_speed(cmd)
             logger.debug(f"[MOCK] Spindle FWD S{self._mock_state.cmd}")
-            
+
         elif cmd.startswith('M4'):
-            self._mock_state.direction = SpindleDirection.REVERSE
-            self._mock_state.cmd = self._parse_speed(cmd)
+            with self._lock:
+                self._mock_state.direction = SpindleDirection.REVERSE
+                self._mock_state.cmd = self._parse_speed(cmd)
             logger.debug(f"[MOCK] Spindle REV S{self._mock_state.cmd}")
             
         else:
@@ -1107,35 +1148,37 @@ class HalInterface:
     def set_mock_load(self, load_pct: float):
         """
         Set simulated cutting load.
-        
+
         Args:
             load_pct: Load percentage (0-100)
         """
-        self._mock_state.load_pct = max(0.0, min(100.0, load_pct))
+        with self._lock:
+            self._mock_state.load_pct = max(0.0, min(100.0, load_pct))
     
     def set_mock_fault(self, fault_type: str, enabled: bool):
         """
         Enable/disable simulated faults.
-        
+
         Args:
             fault_type: 'encoder', 'polarity', 'dpll', 'vfd', or 'estop'
             enabled: True to enable fault
         """
-        if fault_type == 'encoder':
-            self._mock_state.encoder_fault = enabled
-        elif fault_type == 'polarity':
-            self._mock_state.polarity_reversed = enabled
-        elif fault_type == 'dpll':
-            self._mock_state.dpll_disabled = enabled
-        elif fault_type == 'vfd':
-            self._mock_state.vfd_fault = enabled
-        elif fault_type == 'estop':
-            self._mock_state.estop_triggered = enabled
-            if enabled:
-                # E-stop immediately stops spindle command
-                self._mock_state.cmd = 0.0
-        else:
-            logger.warning(f"Unknown fault type: {fault_type}")
+        with self._lock:
+            if fault_type == 'encoder':
+                self._mock_state.encoder_fault = enabled
+            elif fault_type == 'polarity':
+                self._mock_state.polarity_reversed = enabled
+            elif fault_type == 'dpll':
+                self._mock_state.dpll_disabled = enabled
+            elif fault_type == 'vfd':
+                self._mock_state.vfd_fault = enabled
+            elif fault_type == 'estop':
+                self._mock_state.estop_triggered = enabled
+                if enabled:
+                    # E-stop immediately stops spindle command
+                    self._mock_state.cmd = 0.0
+            else:
+                logger.warning(f"Unknown fault type: {fault_type}")
         
         logger.debug(f"[MOCK] {fault_type} fault: {enabled}")
     
@@ -1353,7 +1396,7 @@ class IniFileHandler:
         
         return params
     
-    def generate_ini_section(self, params: Dict[str, float], 
+    def generate_ini_section(self, params: Dict[str, float],
                             include_comments: bool = True) -> str:
         """
         Generate INI file section text.
@@ -1366,9 +1409,15 @@ class IniFileHandler:
             Formatted INI section text
         """
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        
+
         lines = []
-        
+
+        def safe_value(key: str, default: float) -> float:
+            try:
+                return float(params.get(key, default))
+            except (TypeError, ValueError):
+                return default
+
         if include_comments:
             lines.extend([
                 "# ==============================================================================",
@@ -1384,34 +1433,34 @@ class IniFileHandler:
         if include_comments:
             lines.append("# PID Gains")
         lines.extend([
-            f"P = {params.get('P', 0.1):.3f}",
-            f"I = {params.get('I', 1.0):.3f}",
-            f"D = {params.get('D', 0.0):.3f}",
-            f"FF0 = {params.get('FF0', 1.0):.3f}",
-            f"FF1 = {params.get('FF1', 0.35):.3f}",
-            f"DEADBAND = {params.get('Deadband', 10.0):.1f}",
+            f"P = {safe_value('P', 0.1):.3f}",
+            f"I = {safe_value('I', 1.0):.3f}",
+            f"D = {safe_value('D', 0.0):.3f}",
+            f"FF0 = {safe_value('FF0', 1.0):.3f}",
+            f"FF1 = {safe_value('FF1', 0.35):.3f}",
+            f"DEADBAND = {safe_value('Deadband', 10.0):.1f}",
             "",
         ])
-        
+
         if include_comments:
             lines.append("# Anti-Windup Limits")
         lines.extend([
-            f"MAX_ERROR_I = {params.get('MaxErrorI', 60.0):.1f}",
-            f"MAX_CMD_D = {params.get('MaxCmdD', 1200.0):.1f}",
+            f"MAX_ERROR_I = {safe_value('MaxErrorI', 60.0):.1f}",
+            f"MAX_CMD_D = {safe_value('MaxCmdD', 1200.0):.1f}",
             "",
         ])
-        
+
         if include_comments:
             lines.append("# Rate Limiting (match VFD accel time)")
         lines.extend([
-            f"RATE_LIMIT = {params.get('RateLimit', 1200.0):.1f}",
+            f"RATE_LIMIT = {safe_value('RateLimit', 1200.0):.1f}",
             "",
         ])
-        
+
         if include_comments:
             lines.append("# Feedback Filter")
         lines.extend([
-            f"FILTER_GAIN = {params.get('FilterGain', 0.5):.2f}",
+            f"FILTER_GAIN = {safe_value('FilterGain', 0.5):.2f}",
             "",
         ])
         
