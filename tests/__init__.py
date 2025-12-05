@@ -28,35 +28,45 @@ Test Categories:
        - Watchdog Test (Mock)
 """
 
-from tests.base import BaseTest, PerformanceTargets, TARGETS, TestDescription
+from .base import BaseTest, PerformanceTargets, TARGETS, TestDescription
+
+
+class _TkUnavailable:
+    """Fallback UI placeholder used when tkinter components are unavailable."""
+
+    def __init__(self, *_, **__):
+        raise ImportError(
+            "Tkinter UI components are unavailable in this environment; "
+            "install tkinter to use TestsTab or checklist widgets."
+        )
+
 
 # Conditionally import UI components that require tkinter
-# These are not needed for pytest test collection/execution
 try:
-    from tests.tests_tab import TestsTab
-    from tests.checklists_tab import ChecklistsTab, ChecklistWidget
+    from .tests_tab import TestsTab
+    from .checklists_tab import ChecklistsTab, ChecklistWidget
     _HAS_TKINTER = True
 except ImportError:
-    TestsTab = None
-    ChecklistsTab = None
-    ChecklistWidget = None
+    TestsTab = _TkUnavailable
+    ChecklistsTab = _TkUnavailable
+    ChecklistWidget = _TkUnavailable
     _HAS_TKINTER = False
 
-# Import individual test classes for direct access
-from tests.test_signal_chain import SignalChainTest
-from tests.test_preflight import PreflightTest
-from tests.test_encoder import EncoderTest
-from tests.test_open_loop import OpenLoopTest
-from tests.test_forward import ForwardTest
-from tests.test_reverse import ReverseTest
-from tests.test_rate_limit import RateLimitTest
-from tests.test_step import StepTest
-from tests.test_load import LoadTest
-from tests.test_steadystate import SteadyStateTest
-from tests.test_decel import DecelTest
-from tests.test_ramp import RampTest
-from tests.test_full_suite import FullSuiteTest
-from tests.test_watchdog import WatchdogTest
+# Import individual test classes for direct access using relative imports
+from .test_signal_chain import SignalChainTest
+from .test_preflight import PreflightTest
+from .test_encoder import EncoderTest
+from .test_open_loop import OpenLoopTest
+from .test_forward import ForwardTest
+from .test_reverse import ReverseTest
+from .test_rate_limit import RateLimitTest
+from .test_step import StepTest
+from .test_load import LoadTest
+from .test_steadystate import SteadyStateTest
+from .test_decel import DecelTest
+from .test_ramp import RampTest
+from .test_full_suite import FullSuiteTest
+from .test_watchdog import WatchdogTest
 
 __all__ = [
     # Main UI components
