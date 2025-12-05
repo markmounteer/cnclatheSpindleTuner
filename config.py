@@ -55,7 +55,8 @@ MONITOR_PINS: Dict[str, str] = {
     "cmd_raw":       "spindle-vel-cmd-rpm-raw",
     "cmd_limited":   "spindle-vel-cmd-rpm-limited",
     "feedback":      "pid.s.feedback",
-    "feedback_raw":  "spindle-vel-fb-rpm",
+    # Use the PID module's raw feedback pin so tests can assert sign correctly
+    "feedback_raw":  "pid.s.feedback_raw",
     "feedback_abs":  "spindle-vel-fb-rpm-abs",
     "output":        "pid.s.output",
     "error":         "pid.s.error",

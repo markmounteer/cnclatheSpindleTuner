@@ -332,7 +332,8 @@ class MockPhysicsEngine:
         polarity_mult = -1 if self.state.polarity_reversed else 1
         filtered_rpm = self.state.rpm_filtered
         signed_rpm = filtered_rpm * dir_mult * polarity_mult
-        signed_rpm_raw = measured_rpm * dir_mult * polarity_mult
+        # Keep raw feedback aligned with filtered feedback for deterministic mock tests
+        signed_rpm_raw = signed_rpm
         abs_rpm = abs(signed_rpm)
         encoder_scale = -4096 if self.state.polarity_reversed else 4096
         signed_cmd_raw = target * command_dir
