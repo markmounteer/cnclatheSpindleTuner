@@ -83,80 +83,96 @@ when prompted, then release to measure recovery.""",
         self.log_header()
         self.update_progress(0, "Stabilizing at 1000 RPM...")
 
-        self.hal.send_mdi("M3 S1000")
-        self.log_result("Stabilizing at 1000 RPM...")
-        time.sleep(4)
+        try:
+            self.hal.send_mdi("M3 S1000")
+            self.log_result("Stabilizing at 1000 RPM...")
+            time.sleep(4)  # Allow time for stabilization
 
-        if self.test_abort:
-            self.hal.send_mdi("M5")
-            self.end_test()
-            return
-
-        self.update_progress(20, "Measuring baseline...")
-
-        _, baseline_samples = self.sample_signal(MONITOR_PINS['feedback'], 1.0, 0.1)
-        baseline = sum(baseline_samples) / len(baseline_samples) if baseline_samples else 1000
-
-        self.log_result(f"Baseline: {baseline:.0f} RPM")
-        self.log_result("\n" + "="*50)
-        self.log_result(">>> Apply load NOW (wooden stick against chuck) <<<")
-        self.log_result(">>> Hold for 3 seconds, then release <<<")
-        self.log_result("="*50)
-        self.update_progress(30, ">>> APPLY LOAD NOW <<<")
-
-        min_rpm = baseline
-        max_droop = 0
-        droop_time = None
-
-        samples = []
-        start = time.time()
-
-        while time.time() - start < 10.0:
             if self.test_abort:
-                break
+                self._cleanup()
+                return
 
-            fb = self.hal.get_pin_value(MONITOR_PINS['feedback'])
-            t = time.time() - start
-            samples.append((t, fb))
+            self.update_progress(20, "Measuring baseline...")
+            _, baseline_samples = self.sample_signal(MONITOR_PINS['feedback'], 1.0, 0.1)
+            baseline = sum(baseline_samples) / len(baseline_samples) if baseline_samples else 1000
+            self.log_result(f"Baseline: {baseline:.0f} RPM")
 
-            if fb < min_rpm:
-                min_rpm = fb
-                droop_time = t
-                max_droop = baseline - min_rpm
+            self.log_result("\n" + "="*50)
+            self.log_result(">>> Apply load NOW (wooden stick against chuck) <<<")
+            self.log_result(">>> Hold for 3 seconds, then release <<<")
+            self.log_result("="*50)
+            self.update_progress(30, ">>> APPLY LOAD NOW <<<")
 
-            progress = 30 + (t / 10.0) * 50
-            self.update_progress(progress, f"Monitoring... {fb:.0f} RPM")
+            min_rpm = baseline
+            max_droop = 0
+            samples = []
+            start = time.time()
+            monitor_duration = 10.0  # Configurable monitor window
 
-            time.sleep(0.1)
+            while time.time() - start < monitor_duration:
+                if self.test_abort:
+                    self._cleanup()
+                    return
 
-        self.update_progress(85, "Calculating recovery...")
+                fb = self.hal.get_pin_value(MONITOR_PINS['feedback'])
+                t = time.time() - start
+                samples.append((t, fb))
 
-        # Calculate recovery metrics using shared logger logic
-        metrics = self.logger.calculate_load_metrics(samples, baseline)
-        recovery_time = metrics.load_recovery_time_s if metrics.load_recovery_time_s > 0 else None
+                if fb < min_rpm:
+                    min_rpm = fb
+                    max_droop = baseline - min_rpm
 
-        self.log_result(f"\nResults:")
-        self.log_result(f"  Baseline: {baseline:.0f} RPM")
-        self.log_result(f"  Minimum during load: {min_rpm:.0f} RPM")
-        self.log_result(f"  Max droop: {max_droop:.0f} RPM ({max_droop/baseline*100:.1f}%)")
+                progress = 30 + (t / monitor_duration) * 50
+                self.update_progress(progress, f"Monitoring... {fb:.0f} RPM")
+                time.sleep(0.1)
 
-        self.update_progress(100, "Complete")
+            self.update_progress(85, "Calculating recovery...")
 
-        if recovery_time:
-            self.log_result(f"  Recovery time: {recovery_time:.2f} s")
-            self.log_result(f"\nASSESSMENT: {self.assess_recovery(recovery_time)}")
+            # Calculate recovery metrics using shared logger logic
+            metrics = self.logger.calculate_load_metrics(samples, baseline)
+            recovery_time = metrics.load_recovery_time_s if metrics.load_recovery_time_s > 0 else None
 
-            if recovery_time > TARGETS.recovery_good:
-                self.log_result("  -> Consider increasing I-gain or MaxErrorI")
-                self.log_footer("SLOW RECOVERY")
-            elif recovery_time > TARGETS.recovery_excellent:
-                self.log_footer("GOOD")
+            self.log_result(f"\nResults:")
+            self.log_result(f" Baseline: {baseline:.0f} RPM")
+            self.log_result(f" Minimum during load: {min_rpm:.0f} RPM")
+            self.log_result(f" Max droop: {max_droop:.0f} RPM ({max_droop / baseline * 100:.1f}%)")
+
+            self.update_progress(100, "Complete")
+
+            if recovery_time:
+                self.log_result(f" Recovery time: {recovery_time:.2f} s")
+                assessment = self.assess_recovery(recovery_time)
+                self.log_result(f"\nASSESSMENT: {assessment}")
+                if recovery_time > TARGETS.recovery_good:
+                    self.log_result(" -> Consider increasing I-gain or MaxErrorI")
+                    self.log_footer("SLOW RECOVERY")
+                elif recovery_time > TARGETS.recovery_excellent:
+                    self.log_footer("GOOD")
+                else:
+                    self.log_footer("EXCELLENT")
             else:
-                self.log_footer("EXCELLENT")
-        else:
-            self.log_result("  Recovery time: Did not recover within window")
-            self.log_result("  -> May need more I-gain for load rejection")
-            self.log_footer("NO RECOVERY DETECTED")
+                self.log_result(" Recovery time: Did not recover within window")
+                self.log_result(" -> May need more I-gain for load rejection")
+                self.log_footer("NO RECOVERY DETECTED")
 
-        self.log_result("\n>>> Spindle still running - stop manually when ready <<<")
+            self.log_result("\n>>> Spindle still running - stop manually when ready <<<")
+
+        except Exception as e:
+            self.log_result(f"Error during test: {str(e)}")
+            self.log_footer("TEST FAILED")
+        finally:
+            self.end_test()
+
+    def _cleanup(self):
+        """Cleanup spindle on abort or error."""
+        self.hal.send_mdi("M5")
         self.end_test()
+
+    def assess_recovery(self, recovery_time: float) -> str:
+        """Assess recovery time based on targets."""
+        if recovery_time < TARGETS.recovery_excellent:
+            return "EXCELLENT"
+        elif recovery_time < TARGETS.recovery_good:
+            return "GOOD"
+        else:
+            return "SLOW"
