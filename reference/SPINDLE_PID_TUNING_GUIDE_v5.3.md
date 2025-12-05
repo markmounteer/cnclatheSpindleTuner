@@ -435,6 +435,9 @@ halcmd show pin hm2_7i76e.0.encoder.timer-number    # Should be 1
 # Monitor phase error (should be stable)
 watch -n 0.5 "halcmd show param hm2_7i76e.0.dpll.phase-error-us"
 # Should be ±50 µs, not cycling wildly
+
+# Optional: Create a named signal for easier HALShow monitoring
+net hm2-dpll-phase-error hm2_7i76e.0.dpll.phase-error-us
 ```
 
 **If DPLL not configured:** Velocity readings below 100 RPM will be unusably noisy.

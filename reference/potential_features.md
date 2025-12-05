@@ -1,13 +1,12 @@
 # Potential Features Register
 **Directory:** /home/user/cnclatheSpindleTuner/reference/
-**Last Updated:** 2025-12-05 22:15 UTC
-**Total Entries:** 5 | **New:** 5 | **Under Review:** 0 | **Resolved:** 0
+**Last Updated:** 2025-12-06 00:45 UTC
+**Total Entries:** 4 | **New:** 4 | **Under Review:** 0 | **Resolved:** 0
 
 ## Summary Index
 | ID | Status | Priority | Source File | Title | Submitted |
 |----|--------|----------|-------------|-------|-----------|
 | FEAT-20251205-001 | New | Low | SPINDLE_PID_TUNING_GUIDE_v5.3.md | Add read-request function documentation | 2025-12-05 |
-| FEAT-20251205-002 | New | Low | SPINDLE_PID_TUNING_GUIDE_v5.3.md | Add DPLL phase-error diagnostic net | 2025-12-05 |
 | FEAT-20251205-003 | New | Low | SPINDLE_PID_TUNING_GUIDE_v5.3.md | Document lowpass filter gain formula | 2025-12-05 |
 | FEAT-20251205-004 | New | Low | SPINDLE_PID_TUNING_GUIDE_v5.3.md | Document debounce delay units | 2025-12-05 |
 | FEAT-20251205-006 | New | Low | SPINDLE_PID_TUNING_GUIDE_v5.3.md | Add at-speed relative tolerance with scale | 2025-12-05 |
@@ -42,39 +41,6 @@
 - Add conditional guidance ("if available")
 - Consider adding to Section 5 (Pre-Flight) or Section 15 (Hardware Specifications)
 - Low priority as current configuration works without it
-
-**Review History:**
-- 2025-12-05 | External AI Agent | Submitted feature suggestion.
-- 2025-12-05 | Claude | Evaluated as feature suggestion; added to register.
-
----
-
-### FEAT-20251205-002 Add DPLL phase-error diagnostic net
-
-| Field | Value |
-|-------|-------|
-| Status | New |
-| Source File | SPINDLE_PID_TUNING_GUIDE_v5.3.md |
-| Location | Section 5.4 (DPLL Verification) |
-| Submitted By | External AI Agent (ChatGPT) |
-| Evaluated By | Claude (claude-opus-4-5-20251101) |
-| Submitted | 2025-12-05 |
-| Priority | Low |
-| Duplicate Of | N/A |
-
-**Description:** Add documentation for a DPLL phase-error diagnostic signal that can be monitored in HALShow: `net hm2-dpll-phase-error hm2_7i76e.0.dpll.phase-error-us`
-
-**Context:** Section 5.4 already shows how to verify DPLL configuration and monitor phase error with `watch` command, but doesn't suggest creating a named signal for easier HALShow monitoring.
-
-**Original Agent Rationale:** Agent suggests "Add a diagnostic net for phase error so you can watch it in HALShow" and notes that timer-number latching "should typically be enabled" for reduced following errors.
-
-**Evaluator Assessment:** This is a minor convenience enhancement. The guide already shows `watch -n 0.5 "halcmd show param hm2_7i76e.0.dpll.phase-error-us"` in Section 5.4, which accomplishes the same monitoring goal. A named net would make HALShow access slightly easier but is not essential.
-
-**Implementation Considerations:**
-- Could add one line to Section 5.4 verification steps
-- Very low implementation effort
-- Minimal documentation value as alternative already shown
-- Consider whether adding more signals adds complexity
 
 **Review History:**
 - 2025-12-05 | External AI Agent | Submitted feature suggestion.
