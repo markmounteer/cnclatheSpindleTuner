@@ -14,6 +14,6 @@ from hal_interface import HalInterface
 
 
 @pytest.fixture
-def mock_hal():
+def mock_hal() -> HalInterface:
     """Provide a HAL interface forced into mock mode for deterministic testing."""
     return HalInterface(mock=True)
