@@ -437,7 +437,7 @@ class DashboardTab:
         """Setup real-time plot with matplotlib and enhanced controls."""
         plot_frame = ttk.LabelFrame(parent, text="Real-Time Plot", padding="5")
         plot_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
-        
+
         if not HAS_MATPLOTLIB:
             # Text fallback for systems without matplotlib
             ttk.Label(plot_frame, text="Matplotlib not available - Text fallback mode",
@@ -472,7 +472,12 @@ class DashboardTab:
         self.plot_grid = tk.BooleanVar(value=True)
         ttk.Checkbutton(controls, text="Grid", variable=self.plot_grid,
                        command=self._toggle_plot_grid).pack(side=tk.LEFT, padx=5)
-        
+
+        # Initialize trace visibility variables before building axes so defaults apply
+        for name, config in PLOT_TRACES.items():
+            if name not in self.show_traces:
+                self.show_traces[name] = tk.BooleanVar(value=PLOT_DEFAULTS.get(name, True))
+
         # Fit button (manual auto-scale without clearing data)
         ttk.Button(controls, text="Fit", width=4,
                   command=lambda: setattr(self, 'plot_dirty', True)).pack(side=tk.LEFT, padx=5)
@@ -510,12 +515,11 @@ class DashboardTab:
         # Trace visibility controls
         trace_frame = ttk.Frame(plot_frame)
         trace_frame.pack(fill=tk.X)
-        
+
         ttk.Label(trace_frame, text="Show:", font=("Arial", 9)).pack(side=tk.LEFT)
         for name, config in PLOT_TRACES.items():
-            var = tk.BooleanVar(value=PLOT_DEFAULTS.get(name, True))
-            self.show_traces[name] = var
-            cb = ttk.Checkbutton(trace_frame, text=config['label'], 
+            var = self.show_traces[name]
+            cb = ttk.Checkbutton(trace_frame, text=config['label'],
                                 variable=var, command=self._update_trace_visibility)
             cb.pack(side=tk.LEFT, padx=5)
     
@@ -523,7 +527,7 @@ class DashboardTab:
         """Setup or reconfigure plot axes."""
         if self.figure is None:
             return
-        
+
         self.figure.clear()
         self.background = None  # Reset blitting background
         self.plot_dirty = True  # Request full redraw
@@ -539,7 +543,7 @@ class DashboardTab:
         
         # Create lines with animated=True for blitting optimization
         self.lines = {}
-        
+
         if self.dual_axis.get():
             # Dual axis mode: RPM on left, error on right
             self.ax2 = self.ax.twinx()
@@ -563,12 +567,6 @@ class DashboardTab:
                                          label=config['label'], linewidth=1.5,
                                          linestyle='--', animated=True)
                     self.lines[name] = line
-            
-            # Combined legend
-            lines1, labels1 = self.ax.get_legend_handles_labels()
-            lines2, labels2 = self.ax2.get_legend_handles_labels()
-            self.ax.legend(lines1 + lines2, labels1 + labels2, 
-                          loc='upper right', fontsize=8, framealpha=0.5)
         else:
             # Single axis mode
             self.ax2 = None
@@ -577,8 +575,6 @@ class DashboardTab:
                                     label=config['label'], linewidth=1.5,
                                     animated=True)
                 self.lines[name] = line
-            
-            self.ax.legend(loc='upper right', fontsize=8, framealpha=0.5)
 
         # Apply existing trace visibility preferences (e.g., after toggling dual axis)
         for name, line in self.lines.items():
@@ -586,7 +582,24 @@ class DashboardTab:
             if isinstance(visible_var, tk.BooleanVar):
                 line.set_visible(visible_var.get())
 
-        
+        # Build legend using only visible traces to reflect defaults immediately
+        if self.dual_axis.get():
+            lines1 = [l for l in self.ax.get_lines() if l.get_visible()]
+            labels1 = [l.get_label() for l in lines1]
+            if self.ax2:
+                lines2 = [l for l in self.ax2.get_lines() if l.get_visible()]
+                labels2 = [l.get_label() for l in lines2]
+                if lines1 or lines2:
+                    self.ax.legend(lines1 + lines2, labels1 + labels2,
+                                   loc='upper right', fontsize=8, framealpha=0.5)
+        else:
+            visible_lines = [line for line in self.ax.get_lines() if line.get_visible()]
+            if visible_lines:
+                self.ax.legend(visible_lines,
+                               [line.get_label() for line in visible_lines],
+                               loc='upper right', fontsize=8, framealpha=0.5)
+
+
         if self.canvas:
             self.canvas.draw()
     
