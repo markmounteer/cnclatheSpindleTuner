@@ -48,6 +48,14 @@ This document contains potential improvements identified during code review that
 - **Rationale**: Improves code readability and helps developers understand the data structures being used without needing to reference config.py.
 - **Implementation considerations**: Low risk. Can be done as type comments (as shown) or by creating type aliases in the module.
 
+### 3. Implement Optional HAL Reconnection Attempts
+
+- **Source file**: `hal_interface.py`
+- **Current state**: On failed halcmd verification, the interface falls back to mock mode without retrying a real HAL connection.
+- **Suggested enhancement**: Add configurable reconnection attempts with backoff before switching to mock mode, and optionally allow periodic reconnection checks while in mock fallback.
+- **Rationale**: Helps maintain real hardware control when transient connectivity issues occur, aligning behavior with the stated auto-reconnect improvement in the module docstring.
+- **Implementation considerations**: Add retry counters and delays configurable via settings; ensure thread safety around connection state transitions; avoid blocking critical paths by running retries in a background thread or using non-blocking checks.
+
 ---
 
 *Document generated: 2025-12-05*

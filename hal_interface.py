@@ -199,8 +199,8 @@ class MockPhysicsEngine:
     def update(self) -> Dict[str, float]:
         """
         Run one physics simulation step.
-        
-        Returns dict of all simulated pin values.
+
+        Returns a dict of all simulated pin values.
         """
         now = time.monotonic()
         dt = min(now - self._last_update_mono, 0.5)  # Cap dt to avoid large jumps
@@ -570,7 +570,7 @@ class HalInterface:
     
     def _run_halcmd(self, args: List[str], *, timeout: float = 1.0) -> subprocess.CompletedProcess:
         """
-        Run halcmd with given arguments.
+        Run halcmd with the given arguments.
         
         Args:
             args: Command arguments (e.g., ['-s', 'getp', 'pin.name'])
@@ -805,7 +805,7 @@ class HalInterface:
         Read multiple pins in a single halcmd invocation.
 
         Uses 'getp'/'gets' commands fed via stdin to a single halcmd process.
-        This is more reliable than 'show pin' which has variable output
+        This is more reliable than 'show pin,' which has variable output
         format (connected pins include arrows and signal names).
         """
         if not pin_names:
