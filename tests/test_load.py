@@ -4,10 +4,11 @@ Load Recovery Test (Guide §7.2)
 Interactive test to measure load disturbance rejection.
 """
 
-import time
 import threading
+import time
 
 from config import MONITOR_PINS
+from logger import DataLogger
 from tests.base import BaseTest, TestDescription, TARGETS
 
 
@@ -132,13 +133,8 @@ when prompted, then release to measure recovery.""",
 
         self.update_progress(85, "Calculating recovery...")
 
-        # Find recovery time
-        recovery_time = None
-        if droop_time:
-            for t, fb in samples:
-                if t > droop_time and abs(fb - baseline) < 20:
-                    recovery_time = t - droop_time
-                    break
+        metrics = DataLogger().calculate_load_metrics(samples, baseline)
+        recovery_time = metrics.load_recovery_time_s if metrics.load_recovery_time_s > 0 else None
 
         self.log_result(f"\nResults:")
         self.log_result(f"  Baseline: {baseline:.0f} RPM")

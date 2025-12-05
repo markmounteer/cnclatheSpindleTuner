@@ -9,9 +9,11 @@ Contains common functionality for all test modules:
 """
 
 import time
-from dataclasses import dataclass
-from typing import List, Tuple, Callable, Optional, Dict
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from typing import Callable, Dict, List, Optional, Tuple
+
+from logger import DataLogger
 
 
 # =============================================================================
@@ -300,11 +302,7 @@ class BaseTest(ABC):
         Returns:
             Dictionary with rise_time, settling_time, overshoot, ss_error, max_error
         """
-        step_size = abs(end - start)
-        feedbacks = [d.get('feedback', 0) for d in data]
-        times = [d.get('time', 0) for d in data]
-
-        if not feedbacks or not times:
+        if not data:
             return {
                 'rise_time': 0,
                 'settling_time': 0,
@@ -313,59 +311,14 @@ class BaseTest(ABC):
                 'max_error': 0,
             }
 
-        # Rise time (10% to 90%)
-        threshold_10 = start + 0.1 * (end - start)
-        threshold_90 = start + 0.9 * (end - start)
-
-        t_10 = None
-        t_90 = None
-
-        for t, fb in zip(times, feedbacks):
-            if t_10 is None and fb >= threshold_10:
-                t_10 = t
-            if t_90 is None and fb >= threshold_90:
-                t_90 = t
-                break
-
-        rise_time = (t_90 - t_10) if (t_10 is not None and t_90 is not None) else 0
-
-        # Settling time (2% of target)
-        tolerance = 0.02 * abs(end)
-        settling_time = times[-1]
-
-        for i in range(len(feedbacks) - 1, -1, -1):
-            if abs(feedbacks[i] - end) > tolerance:
-                if i + 1 < len(times):
-                    settling_time = times[i + 1]
-                break
-        else:
-            settling_time = times[0] if times else 0
-
-        # Overshoot
-        if end > start:
-            max_fb = max(feedbacks)
-            overshoot = max(0, (max_fb - end) / step_size * 100)
-        else:
-            min_fb = min(feedbacks)
-            overshoot = max(0, (end - min_fb) / step_size * 100)
-
-        # Steady-state error (average of last second)
-        last_second = [d for d in data if d.get('time', 0) > times[-1] - 1.0]
-        if last_second:
-            ss_fb = sum(d.get('feedback', 0) for d in last_second) / len(last_second)
-            ss_error = end - ss_fb
-        else:
-            ss_error = 0
-
-        # Maximum error during step
-        max_error = max(abs(d.get('error', 0)) for d in data) if data else 0
+        metrics = DataLogger().calculate_step_metrics(start, end, data)
 
         return {
-            'rise_time': rise_time,
-            'settling_time': settling_time,
-            'overshoot': overshoot,
-            'ss_error': ss_error,
-            'max_error': max_error,
+            'rise_time': metrics.rise_time_s if metrics.rise_time_s >= 0 else 0,
+            'settling_time': metrics.settling_time_s if metrics.settling_time_s >= 0 else 0,
+            'overshoot': metrics.overshoot_pct,
+            'ss_error': metrics.steady_state_error,
+            'max_error': metrics.max_error,
         }
 
     def calculate_statistics(self, values: List[float]) -> Dict[str, float]:

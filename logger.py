@@ -3,45 +3,48 @@
 Spindle Tuner - Data Logging & Performance Metrics
 
 Handles data buffering, CSV export, and performance metric calculations.
-
-Features:
-- Circular buffer for real-time plotting
-- Full session recording for export
-- Monotonic timing for clock-jump immunity
-- CSV export with timestamps
-- Performance metrics calculation
 """
 
+from __future__ import annotations
+
 import csv
+import logging
+import threading
 import time
+from collections import deque
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-from collections import deque
-from dataclasses import dataclass, field, asdict
-from typing import Dict, List, Optional, Deque, Tuple
+from typing import Any, Deque, Dict, List, Optional, Tuple
 
 from config import UPDATE_INTERVAL_MS, HISTORY_DURATION_S
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
 class PerformanceMetrics:
     """Performance metrics from test runs."""
-    rise_time_s: float = 0.0       # Time from 10% to 90%
-    settling_time_s: float = 0.0   # Time to stay within 2% band
-    overshoot_pct: float = 0.0     # Peak overshoot percentage
-    steady_state_error: float = 0.0
-    max_error: float = 0.0
-    load_recovery_time_s: float = 0.0
-    thermal_drift_rpm: float = 0.0
-    
-    def to_dict(self) -> Dict:
+
+    rise_time_s: float = 0.0  # Time from 10% to 90%
+    settling_time_s: float = 0.0  # Time after which signal stays within 2% band
+    overshoot_pct: float = 0.0  # Peak overshoot percentage
+    steady_state_error: float = 0.0  # Average error in steady state (signed)
+    max_error: float = 0.0  # Maximum absolute error during test
+    load_recovery_time_s: float = 0.0  # Time to recover from load step
+    thermal_drift_rpm: float = 0.0  # RPM drift over time (steady-state test)
+    iae: float = 0.0  # Integral of Absolute Error
+
+    def to_dict(self) -> Dict[str, float]:
         return asdict(self)
 
 
 @dataclass
 class DataPoint:
     """Single data point for logging."""
-    timestamp: float
+
+    timestamp: float  # Epoch time
+    relative_time: float  # Monotonic time from start of session
     cmd_raw: float
     cmd_limited: float
     feedback: float
@@ -49,16 +52,16 @@ class DataPoint:
     errorI: float
     output: float
     at_speed: bool
-    
-    def to_csv_row(self) -> List:
+
+    def to_csv_row(self) -> List[str]:
         return [
             datetime.fromtimestamp(self.timestamp).isoformat(),
-            f"{self.timestamp - int(self.timestamp):.3f}",
-            f"{self.cmd_raw:.1f}",
-            f"{self.cmd_limited:.1f}",
-            f"{self.feedback:.1f}",
-            f"{self.error:.2f}",
-            f"{self.errorI:.2f}",
+            f"{self.relative_time:.4f}",
+            f"{self.cmd_raw:.2f}",
+            f"{self.cmd_limited:.2f}",
+            f"{self.feedback:.2f}",
+            f"{self.error:.3f}",
+            f"{self.errorI:.3f}",
             f"{self.output:.2f}",
             "1" if self.at_speed else "0",
         ]
@@ -67,266 +70,330 @@ class DataPoint:
 class DataLogger:
     """
     Manages data collection, buffering, and export.
-    
-    Features:
-    - Circular buffer for real-time plotting
+
+    - Thread-safe circular buffer for real-time plotting
     - Full session recording for export
-    - CSV export with timestamps
-    - Performance metrics calculation
+    - Monotonic clock for accurate relative timing
+    - Step/load performance metrics (rise/settling/overshoot/IAE)
     """
-    
+
     def __init__(self, buffer_duration_s: float = HISTORY_DURATION_S):
-        """Initialize data logger with specified buffer duration."""
-        # Calculate buffer size based on update rate
-        self.buffer_size = int(buffer_duration_s * 1000 / UPDATE_INTERVAL_MS)
-        
+        self._lock = threading.RLock()
+
+        # Guard against misconfig: always keep >= 1 sample of history.
+        self.buffer_size = max(1, int(buffer_duration_s * 1000 / UPDATE_INTERVAL_MS))
+
         # Circular buffers for plotting (time-limited)
         self.time_buffer: Deque[float] = deque(maxlen=self.buffer_size)
         self.cmd_buffer: Deque[float] = deque(maxlen=self.buffer_size)
         self.feedback_buffer: Deque[float] = deque(maxlen=self.buffer_size)
         self.error_buffer: Deque[float] = deque(maxlen=self.buffer_size)
         self.errorI_buffer: Deque[float] = deque(maxlen=self.buffer_size)
-        
+
         # Full session recording (unlimited, for export)
         self.recording: bool = True
         self.recorded_data: List[DataPoint] = []
-        
+
         # Session tracking
         self.session_start: float = time.time()
         self._start_time_mono: Optional[float] = None
-    
-    def add_sample(self, values: Dict[str, float]):
-        """Add a new data sample."""
-        now = time.time()
+
+    # ---------------------------------------------------------------------
+    # Data ingestion / retrieval
+    # ---------------------------------------------------------------------
+
+    def add_sample(self, values: Dict[str, float]) -> None:
+        """Add a new data sample in a thread-safe manner."""
+        now_epoch = time.time()
         now_mono = time.monotonic()
-        
-        if self._start_time_mono is None:
-            self._start_time_mono = now_mono
-        
-        relative_time = now_mono - self._start_time_mono
-        
-        # Update circular buffers
-        self.time_buffer.append(relative_time)
-        self.cmd_buffer.append(values.get('cmd_limited', 0))
-        self.feedback_buffer.append(values.get('feedback', 0))
-        self.error_buffer.append(values.get('error', 0))
-        self.errorI_buffer.append(values.get('errorI', 0))
-        
-        # Record if enabled
-        if self.recording:
-            point = DataPoint(
-                timestamp=now,
-                cmd_raw=values.get('cmd_raw', 0),
-                cmd_limited=values.get('cmd_limited', 0),
-                feedback=values.get('feedback', 0),
-                error=values.get('error', 0),
-                errorI=values.get('errorI', 0),
-                output=values.get('output', 0),
-                at_speed=values.get('at_speed', 0) > 0.5,
+
+        with self._lock:
+            if self._start_time_mono is None:
+                self._start_time_mono = now_mono
+
+            relative_time = now_mono - self._start_time_mono
+
+            cmd_limited = float(values.get("cmd_limited", 0.0))
+            feedback = float(values.get("feedback", 0.0))
+            error = float(values.get("error", 0.0))
+            errorI = float(values.get("errorI", 0.0))
+
+            self.time_buffer.append(relative_time)
+            self.cmd_buffer.append(cmd_limited)
+            self.feedback_buffer.append(feedback)
+            self.error_buffer.append(error)
+            self.errorI_buffer.append(errorI)
+
+            if not self.recording:
+                return
+
+            self.recorded_data.append(
+                DataPoint(
+                    timestamp=now_epoch,
+                    relative_time=relative_time,
+                    cmd_raw=float(values.get("cmd_raw", 0.0)),
+                    cmd_limited=cmd_limited,
+                    feedback=feedback,
+                    error=error,
+                    errorI=errorI,
+                    output=float(values.get("output", 0.0)),
+                    at_speed=values.get("at_speed", 0.0) > 0.5,
+                )
             )
-            self.recorded_data.append(point)
-    
+
     def get_plot_data(self) -> Tuple[List[float], List[float], List[float], List[float], List[float]]:
-        """Get data for plotting."""
-        return (
-            list(self.time_buffer),
-            list(self.cmd_buffer),
-            list(self.feedback_buffer),
-            list(self.error_buffer),
-            list(self.errorI_buffer),
-        )
-    
-    def clear_buffers(self):
-        """Clear all plot buffers."""
-        self.time_buffer.clear()
-        self.cmd_buffer.clear()
-        self.feedback_buffer.clear()
-        self.error_buffer.clear()
-        self.errorI_buffer.clear()
-        self._start_time_mono = None
-    
-    def clear_recording(self):
-        """Clear recorded data."""
-        self.recorded_data.clear()
-        self.session_start = time.time()
-    
-    def set_recording(self, enabled: bool):
-        """Enable or disable recording."""
-        self.recording = enabled
-    
+        """Get a copy of time-series buffers for plotting (thread-safe)."""
+        with self._lock:
+            return (
+                list(self.time_buffer),
+                list(self.cmd_buffer),
+                list(self.feedback_buffer),
+                list(self.error_buffer),
+                list(self.errorI_buffer),
+            )
+
+    def clear_buffers(self) -> None:
+        """Clear all plot buffers (and reset the relative timer)."""
+        with self._lock:
+            self.time_buffer.clear()
+            self.cmd_buffer.clear()
+            self.feedback_buffer.clear()
+            self.error_buffer.clear()
+            self.errorI_buffer.clear()
+            self._start_time_mono = None
+
+    def clear_recording(self) -> None:
+        """Clear recorded data (export history)."""
+        with self._lock:
+            self.recorded_data.clear()
+            self.session_start = time.time()
+
+    def set_recording(self, enabled: bool) -> None:
+        """Enable or disable data recording."""
+        self.recording = bool(enabled)
+
     def get_point_count(self) -> int:
         """Get number of recorded points."""
-        return len(self.recorded_data)
-    
-    def export_csv(self, filepath: Path) -> bool:
-        """
-        Export recorded data to CSV file.
+        with self._lock:
+            return len(self.recorded_data)
 
-        Args:
-            filepath: Path to write CSV file to
+    # ---------------------------------------------------------------------
+    # CSV export
+    # ---------------------------------------------------------------------
 
-        Returns:
-            True if export succeeded, False if no data to export
+    def export_csv(self, filepath: Path, metadata: Optional[Dict[str, Any]] = None) -> bool:
+        """Export recorded data to a CSV file."""
+        with self._lock:
+            if not self.recorded_data:
+                return False
+            data_copy = list(self.recorded_data)
 
-        Raises:
-            OSError: If file cannot be written
-            PermissionError: If permission denied
-        """
-        if not self.recorded_data:
+        try:
+            filepath.parent.mkdir(parents=True, exist_ok=True)
+
+            with filepath.open("w", newline="") as f:
+                writer = csv.writer(f)
+
+                if metadata:
+                    writer.writerow(["# Metadata"])
+                    for k, v in metadata.items():
+                        writer.writerow([f"# {k}", v])
+                    writer.writerow([])  # spacer
+
+                writer.writerow(
+                    [
+                        "timestamp_iso",
+                        "time_s",
+                        "cmd_raw",
+                        "cmd_limited",
+                        "feedback",
+                        "error",
+                        "errorI",
+                        "output",
+                        "at_speed",
+                    ]
+                )
+
+                for point in data_copy:
+                    writer.writerow(point.to_csv_row())
+
+            return True
+        except Exception:
+            log.exception("CSV export failed for %s", filepath)
             return False
 
-        filepath = Path(filepath)
-        filepath.parent.mkdir(parents=True, exist_ok=True)
+    # ---------------------------------------------------------------------
+    # Metrics helpers
+    # ---------------------------------------------------------------------
 
-        with open(filepath, 'w', newline='', encoding='utf-8') as f:
-            writer = csv.writer(f)
-            writer.writerow([
-                'timestamp', 'time_s', 'cmd_raw', 'cmd_limited',
-                'feedback', 'error', 'errorI', 'output', 'at_speed'
-            ])
+    @staticmethod
+    def _interpolate_time(t1: float, y1: float, t2: float, y2: float, target_y: float) -> float:
+        """Linear interpolation to find time t where y == target_y."""
+        if y2 == y1:
+            return t1
+        frac = (target_y - y1) / (y2 - y1)
+        return t1 + frac * (t2 - t1)
 
-            for point in self.recorded_data:
-                writer.writerow(point.to_csv_row())
+    # ---------------------------------------------------------------------
+    # Performance metrics
+    # ---------------------------------------------------------------------
 
-        return True
-    
-    def calculate_step_metrics(self, start_rpm: float, end_rpm: float,
-                               test_data: List[Tuple[float, float]]) -> PerformanceMetrics:
+    def calculate_step_metrics(
+        self,
+        start_rpm: float,
+        end_rpm: float,
+        test_data: List[Dict[str, float]],
+    ) -> PerformanceMetrics:
         """
-        Calculate performance metrics from step response test data.
-        
-        Args:
-            start_rpm: Starting RPM before step
-            end_rpm: Target RPM after step
-            test_data: List of (time, rpm) tuples
-        
-        Returns:
-            PerformanceMetrics with calculated values
+        Compute step response metrics.
+
+        test_data entries must include:
+            'time' (seconds), 'feedback' (rpm), 'error' (rpm)
+
+        Sentinel values:
+            rise_time_s / settling_time_s = -1.0 if not determinable.
         """
         if not test_data or len(test_data) < 10:
             return PerformanceMetrics()
-        
+
         metrics = PerformanceMetrics()
         step_size = end_rpm - start_rpm
-        
         if abs(step_size) < 10:
             return metrics
-        
-        # Find step start (when command changes)
-        step_start_time = test_data[0][0]
-        
-        # Calculate thresholds
+
+        # Ensure monotonic ordering (robust against duplicates / slight disorder).
+        data = sorted(test_data, key=lambda p: p.get("time", 0.0))
+        step_start_time = float(data[0].get("time", 0.0))
+
         rpm_10 = start_rpm + 0.1 * step_size
         rpm_90 = start_rpm + 0.9 * step_size
-        rpm_98 = start_rpm + 0.98 * step_size
-        rpm_102 = start_rpm + 1.02 * step_size
 
-        lower_band = min(rpm_98, rpm_102)
-        upper_band = max(rpm_98, rpm_102)
-        
-        # Find rise time (10% to 90%) using threshold crossings
-        time_10 = None
-        time_90 = None
-        previous_rpm = start_rpm
+        # 2% settling band relative to the step size
+        band = 0.02 * abs(step_size)
+        lower_band, upper_band = end_rpm - band, end_rpm + band
 
-        for t, rpm in test_data:
+        time_10: Optional[float] = None
+        time_90: Optional[float] = None
+
+        peak_rpm = -float("inf") if step_size > 0 else float("inf")
+        prev_t: Optional[float] = None
+        prev_rpm: Optional[float] = None
+        prev_abs_error: Optional[float] = None
+
+        for point in data:
+            t = float(point.get("time", 0.0))
+            rpm = float(point.get("feedback", 0.0))
+            abs_error = abs(float(point.get("error", 0.0)))
+
+            # Peak detection
             if step_size > 0:
-                crossed_10 = previous_rpm < rpm_10 <= rpm
-                crossed_90 = previous_rpm < rpm_90 <= rpm
+                if rpm > peak_rpm:
+                    peak_rpm = rpm
             else:
-                crossed_10 = previous_rpm > rpm_10 >= rpm
-                crossed_90 = previous_rpm > rpm_90 >= rpm
+                if rpm < peak_rpm:
+                    peak_rpm = rpm
 
-            if time_10 is None and crossed_10:
-                time_10 = t
-            if time_10 is not None and time_90 is None and crossed_90:
-                time_90 = t
-                break
+            # IAE: trapezoidal integration; ignore non-increasing dt
+            if prev_t is not None and prev_abs_error is not None:
+                dt = t - prev_t
+                if dt > 0:
+                    metrics.iae += 0.5 * (prev_abs_error + abs_error) * dt
 
-            previous_rpm = rpm
+            # Rise time interpolation
+            if prev_t is not None and prev_rpm is not None:
+                if time_10 is None:
+                    crossed_10 = (
+                        (step_size > 0 and prev_rpm <= rpm_10 <= rpm)
+                        or (step_size < 0 and prev_rpm >= rpm_10 >= rpm)
+                    )
+                    if crossed_10:
+                        time_10 = self._interpolate_time(prev_t, prev_rpm, t, rpm, rpm_10)
 
-        if time_10 is not None and time_90 is not None:
-            metrics.rise_time_s = time_90 - time_10
+                if time_90 is None:
+                    crossed_90 = (
+                        (step_size > 0 and prev_rpm <= rpm_90 <= rpm)
+                        or (step_size < 0 and prev_rpm >= rpm_90 >= rpm)
+                    )
+                    if crossed_90:
+                        time_90 = self._interpolate_time(prev_t, prev_rpm, t, rpm, rpm_90)
 
-        # Find settling time (within 2% band)
-        settling_time = None
-        in_band_since = None
+            prev_t, prev_rpm, prev_abs_error = t, rpm, abs_error
 
-        for t, rpm in test_data:
-            in_band = lower_band <= rpm <= upper_band
-            if in_band:
-                if in_band_since is None:
-                    in_band_since = t
-            else:
-                in_band_since = None
+        metrics.rise_time_s = (
+            abs(time_90 - time_10) if (time_10 is not None and time_90 is not None) else -1.0
+        )
 
-        last_time = test_data[-1][0]
-        if in_band_since is not None and (last_time - in_band_since) >= 0.5:
-            settling_time = in_band_since - step_start_time
-
-        if settling_time is not None:
-            metrics.settling_time_s = settling_time
-        
-        # Calculate overshoot (handles accel and decel steps)
-        peak_rpm = max(rpm for _, rpm in test_data)
-        min_rpm = min(rpm for _, rpm in test_data)
-
-        overshoot = 0.0
+        # Overshoot (% of step magnitude)
         if step_size > 0:
             overshoot = peak_rpm - end_rpm
-        elif step_size < 0:
-            overshoot = end_rpm - min_rpm
+            metrics.overshoot_pct = (overshoot / step_size * 100.0) if overshoot > 0 else 0.0
+        else:
+            overshoot = end_rpm - peak_rpm
+            metrics.overshoot_pct = (overshoot / abs(step_size) * 100.0) if overshoot > 0 else 0.0
 
-        if overshoot > 0:
-            metrics.overshoot_pct = (overshoot / abs(step_size)) * 100
-        
-        # Calculate max error across the full response
-        errors = [rpm - end_rpm for _, rpm in test_data]
-        if errors:
-            metrics.max_error = max(abs(e) for e in errors)
+        # Settling time: time after which signal stays within the band
+        final_rpm = float(data[-1].get("feedback", 0.0))
+        if lower_band <= final_rpm <= upper_band:
+            settle_time: Optional[float] = None
 
-            # Use the final portion of data to calculate signed steady-state error
-            window_size = min(20, len(errors))
-            steady_state_slice = errors[-window_size:]
-            metrics.steady_state_error = sum(steady_state_slice) / len(steady_state_slice)
-        
+            # Find last out-of-band index; settle_time is the *next* sample’s time.
+            for i in range(len(data) - 1, -1, -1):
+                rpm = float(data[i].get("feedback", 0.0))
+                if not (lower_band <= rpm <= upper_band):
+                    settle_time = float(data[min(i + 1, len(data) - 1)].get("time", step_start_time))
+                    break
+
+            if settle_time is None:
+                # Never left the band at all
+                settle_time = step_start_time
+
+            metrics.settling_time_s = max(0.0, settle_time - step_start_time)
+        else:
+            metrics.settling_time_s = -1.0
+
+        # Max error always computable
+        metrics.max_error = max(abs(float(p.get("error", 0.0))) for p in data)
+
+        # Steady-state error: average over last 1.0 second (bounded by step start)
+        end_time = float(data[-1].get("time", 0.0))
+        ss_start = max(step_start_time, end_time - 1.0)
+        ss_points = [p for p in data if float(p.get("time", 0.0)) >= ss_start]
+        if ss_points:
+            avg_rpm = sum(float(p.get("feedback", 0.0)) for p in ss_points) / len(ss_points)
+            metrics.steady_state_error = end_rpm - avg_rpm
+
         return metrics
-    
-    def calculate_load_metrics(self, test_data: List[Tuple[float, float]],
-                               target_rpm: float) -> PerformanceMetrics:
+
+    def calculate_load_metrics(
+        self,
+        test_data: List[Tuple[float, float]],
+        target_rpm: float,
+    ) -> PerformanceMetrics:
         """
-        Calculate metrics from load recovery test.
-        
+        Calculate metrics from a load recovery test.
+
         Args:
-            test_data: List of (time, rpm) tuples during load test
-            target_rpm: Target RPM during test
-        
-        Returns:
-            PerformanceMetrics with load recovery data
+            test_data: List of (time_s, rpm) tuples.
+            target_rpm: Target RPM during the test.
         """
         if not test_data:
             return PerformanceMetrics()
-        
+
         metrics = PerformanceMetrics()
-        
-        # Find minimum RPM (maximum droop)
-        min_rpm = min(rpm for _, rpm in test_data)
-        droop = target_rpm - min_rpm
-        
-        if droop > 5:  # Significant load was applied
-            # Find when droop reached minimum
-            min_time = None
-            for t, rpm in test_data:
-                if rpm == min_rpm:
-                    min_time = t
-                    break
-            
-            # Find recovery time (back within 20 RPM)
-            if min_time is not None:
-                recovery_threshold = target_rpm - 20
-                for t, rpm in test_data:
-                    if t > min_time and rpm >= recovery_threshold:
-                        metrics.load_recovery_time_s = t - min_time
-                        break
-        
+
+        # Single-pass min search (time, rpm)
+        min_idx, (min_time, min_rpm) = min(enumerate(test_data), key=lambda x: x[1][1])
+        droop = abs(target_rpm - float(min_rpm))
+        if droop <= 5.0:
+            return metrics
+
+        recovery_band = 20.0
+        for t, rpm in test_data[min_idx:]:
+            if abs(float(rpm) - target_rpm) <= recovery_band:
+                metrics.load_recovery_time_s = float(t) - float(min_time)
+                break
+        else:
+            metrics.load_recovery_time_s = -1.0
+
         return metrics
+
