@@ -192,7 +192,7 @@ class MockPhysicsEngine:
         self.state = state
         self.physics = physics_params or PhysicsParameters()
         self._last_update_mono = time.monotonic()
-        self._fixed_dt = deterministic_dt if deterministic_dt is not None else UPDATE_INTERVAL_MS / 1000.0
+        self._fixed_dt = deterministic_dt
         # Deterministic noise for repeatable tests
         self._rng = random.Random(0)
     
@@ -279,7 +279,7 @@ class MockPhysicsEngine:
             else self.state.last_direction.value
         )
         polarity_mult = -1 if self.state.polarity_reversed else 1
-        command_sign = command_dir * polarity_mult
+        command_sign = command_dir
 
         # === PID SIMULATION ===
         FF0 = params.get('FF0', 1.0)
@@ -771,7 +771,8 @@ class HalInterface:
 
     def _read_hal_pin(self, pin_name: str) -> Tuple[float, bool]:
         """Read pin or signal value from real HAL."""
-        accessors = [self._get_cached_accessor(pin_name)] if self._get_cached_accessor(pin_name) else []
+        cached_accessor = self._get_cached_accessor(pin_name)
+        accessors = [cached_accessor] if cached_accessor else []
         accessors.extend([cmd for cmd in ('getp', 'gets') if cmd not in accessors])
 
         for cmd in accessors:
@@ -1406,7 +1407,8 @@ class HalInterface:
                 return True
 
         try:
-            accessors = [self._get_cached_accessor(pin_name)] if self._get_cached_accessor(pin_name) else []
+            cached_accessor = self._get_cached_accessor(pin_name)
+            accessors = [cached_accessor] if cached_accessor else []
             accessors.extend([cmd for cmd in ('getp', 'gets') if cmd not in accessors])
 
             exists = False
