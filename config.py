@@ -186,7 +186,9 @@ ENCODER_SPECS: EncoderSpecs = {
     "name": "ABILKEEN 1024 PPR",
     "counts_per_rev": 4096,
     "differential": True,
-    "dpll_timer_us": -100,
+    # Use a positive timer to match the HAL simulator defaults and avoid suggesting a
+    # reversed sign compared to the live pin value exposed in `hal.py`.
+    "dpll_timer_us": 100,
 }
 
 
