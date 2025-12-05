@@ -17,7 +17,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Deque, Dict, List, Optional, Sequence, Tuple
 
-from config import UPDATE_INTERVAL_MS, HISTORY_DURATION_S
+from config import UPDATE_INTERVAL_MS, HISTORY_DURATION_S, PLOT_TRACES
 
 log = logging.getLogger(__name__)
 
@@ -84,10 +84,9 @@ class DataLogger:
 
         # Circular buffers for plotting (time-limited)
         self.time_buffer: Deque[float] = deque(maxlen=self.buffer_size)
-        self.cmd_buffer: Deque[float] = deque(maxlen=self.buffer_size)
-        self.feedback_buffer: Deque[float] = deque(maxlen=self.buffer_size)
-        self.error_buffer: Deque[float] = deque(maxlen=self.buffer_size)
-        self.errorI_buffer: Deque[float] = deque(maxlen=self.buffer_size)
+        self.trace_buffers: Dict[str, Deque[float]] = {
+            name: deque(maxlen=self.buffer_size) for name in PLOT_TRACES
+        }
 
         # Full session recording (unlimited, for export)
         self.recording: bool = True
@@ -118,16 +117,11 @@ class DataLogger:
 
             relative_time = now_mono - self._start_time_mono
 
-            cmd_limited = self._safe_float(values.get("cmd_limited", 0.0))
-            feedback = self._safe_float(values.get("feedback", 0.0))
-            error = self._safe_float(values.get("error", 0.0))
-            errorI = self._safe_float(values.get("errorI", 0.0))
-
             self.time_buffer.append(relative_time)
-            self.cmd_buffer.append(cmd_limited)
-            self.feedback_buffer.append(feedback)
-            self.error_buffer.append(error)
-            self.errorI_buffer.append(errorI)
+            for name in list(self.trace_buffers):
+                self.trace_buffers[name].append(
+                    self._safe_float(values.get(name, 0.0))
+                )
 
             if not self.recording:
                 return
@@ -137,34 +131,29 @@ class DataLogger:
                     timestamp=now_epoch,
                     relative_time=relative_time,
                     cmd_raw=self._safe_float(values.get("cmd_raw", 0.0)),
-                    cmd_limited=cmd_limited,
-                    feedback=feedback,
-                    error=error,
-                    errorI=errorI,
+                    cmd_limited=self._safe_float(values.get("cmd_limited", 0.0)),
+                    feedback=self._safe_float(values.get("feedback", 0.0)),
+                    error=self._safe_float(values.get("error", 0.0)),
+                    errorI=self._safe_float(values.get("errorI", 0.0)),
                     output=self._safe_float(values.get("output", 0.0)),
                     at_speed=values.get("at_speed", 0.0) > 0.5,
                 )
             )
 
-    def get_plot_data(self) -> Tuple[List[float], List[float], List[float], List[float], List[float]]:
+    def get_plot_data(self) -> Tuple[List[float], Dict[str, List[float]]]:
         """Get a copy of time-series buffers for plotting (thread-safe)."""
         with self._lock:
             return (
                 list(self.time_buffer),
-                list(self.cmd_buffer),
-                list(self.feedback_buffer),
-                list(self.error_buffer),
-                list(self.errorI_buffer),
+                {name: list(buf) for name, buf in self.trace_buffers.items()},
             )
 
     def clear_buffers(self) -> None:
         """Clear all plot buffers without altering the session clock."""
         with self._lock:
             self.time_buffer.clear()
-            self.cmd_buffer.clear()
-            self.feedback_buffer.clear()
-            self.error_buffer.clear()
-            self.errorI_buffer.clear()
+            for buf in self.trace_buffers.values():
+                buf.clear()
 
     def clear_recording(self) -> None:
         """Clear recorded data (export history) and reset timing."""
