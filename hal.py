@@ -883,11 +883,11 @@ class HalInterface:
             for param_name, value in params.items():
                 if param_name not in TUNING_PARAMS:
                     continue
-                
-                # Validate and clamp
+
+                # Validate and clamp using the same rules as set_param
                 _, desc, min_val, max_val, step, _, _ = TUNING_PARAMS[param_name]
-                value = max(min_val, min(max_val, value))
-                
+                value = self._clamp_and_snap(value, min_val, max_val, step)
+
                 pin_name = TUNING_PARAMS[param_name][0]
                 commands.append(f"setp {pin_name} {value}")
             
@@ -896,7 +896,7 @@ class HalInterface:
             
             cmd_str = '\n'.join(commands)
             result = subprocess.run(
-                ['halcmd'],
+                [self._halcmd_path],
                 input=cmd_str,
                 capture_output=True,
                 text=True,
