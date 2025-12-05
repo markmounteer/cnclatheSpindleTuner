@@ -4,25 +4,36 @@ Steady-State Test (Guide §7.3)
 Monitors steady-state accuracy and thermal drift over time.
 """
 
+import csv
+import os
 import time
+from datetime import datetime
 
 from config import MONITOR_PINS
 from tests.base import BaseTest, TestDescription, TARGETS
 
 
 class SteadyStateTest(BaseTest):
-    """Steady-state accuracy test (Guide §7.3)."""
+    """
+    Steady-state accuracy test (Guide §7.3).
+    Monitors speed stability, steady-state error, and thermal drift.
+    """
 
     TEST_NAME = "Steady-State Test"
     GUIDE_REF = "Guide §7.3"
 
-    def __init__(self, *args, duration: int = 30, **kwargs):
+    def __init__(self, *args, duration: int = 30, target_rpm: float = 1000.0, **kwargs):
         super().__init__(*args, **kwargs)
         self.duration = duration
+        self.target_rpm = target_rpm
 
     def set_duration(self, duration: int):
-        """Set the monitoring duration in seconds."""
-        self.duration = max(10, min(300, duration))
+        """Set the monitoring duration in seconds (10s to 10 mins)."""
+        self.duration = max(10, min(600, duration))
+
+    def set_rpm(self, rpm: float):
+        """Set the target RPM for the test."""
+        self.target_rpm = max(100, min(3000, rpm))
 
     @classmethod
     def get_description(cls) -> TestDescription:
@@ -32,59 +43,51 @@ class SteadyStateTest(BaseTest):
             purpose="""
 Monitor spindle speed stability over an extended period.
 Measures:
+- Steady-State Error: Difference between Target and Average RPM.
+- Speed Variation (Noise): Standard deviation and Peak-to-Peak.
+- Thermal Drift: Change in Integrator (I-term) load over time.
 
-- Average error from setpoint
-- Speed variation (min/max/std deviation)
-- Integrator drift (indicates thermal compensation)
-
-Longer durations (60-120s) reveal thermal drift as the
-motor heats up and slip increases.""",
-
+Longer durations (120s+) are required to characterize thermal drift.""",
             prerequisites=[
                 "Step and load tests completed",
-                "Spindle warmed up for accurate results",
-                "For thermal drift, run 2-5 minutes",
+                "Spindle warmed up (unless testing cold-start drift)",
             ],
-
             procedure=[
-                "1. Set desired duration in the UI (default 30s)",
-                "2. Click 'Run Test' to begin",
-                "3. Spindle runs at 1000 RPM",
-                "4. Error and feedback sampled continuously",
-                "5. Statistics calculated at end",
-                "6. Integrator drift shows thermal compensation",
+                "1. Set Duration (default 30s) and Target RPM.",
+                "2. System accelerates to Target RPM.",
+                "3. Wait 4 seconds for stabilization.",
+                "4. Sample Feedback, Error, and Integrator at 20Hz.",
+                "5. Calculate statistics and save CSV log.",
             ],
-
             expected_results=[
-                "Steady-state error: <8 RPM EXCELLENT, <15 RPM GOOD",
-                "Peak-to-peak variation: <10 RPM EXCELLENT, <20 RPM GOOD",
-                "Integrator drift: Normal to see 5-20 increase over minutes",
-                "No oscillation or hunting",
+                "Steady-state error: < 1% of Target RPM",
+                "Peak-to-peak noise: < 2% of Target RPM",
+                "Integrator Drift: Steady increase/decrease (Thermal comp)",
+                "No rhythmic oscillation (Hunting)",
             ],
-
             troubleshooting=[
-                "High variation (>20 RPM pk-pk):",
-                "  -> Reduce P-gain",
-                "  -> Increase deadband",
-                "Large steady-state error:",
+                "High 'Hunting' Variation:",
+                "  -> Reduce P-gain (overshoot) or I-gain (windup)",
+                "  -> Check encoder coupling/belt tension",
+                "Large Steady-State Error:",
                 "  -> Increase I-gain",
-                "  -> Check maxerrorI not limiting",
-                "Integrator not drifting (should increase):",
-                "  -> I-gain may be too low",
-                "  -> maxerrorI may be limiting",
+                "  -> Ensure 'maxerrorI' is not capping the integrator",
+                "No Integrator Drift (during long run):",
+                "  -> I-gain too low to compensate for heat",
             ],
-
             safety_notes=[
-                "Test runs at 1000 RPM",
-                "Duration configurable (10-300 seconds)",
-                "Longer tests reveal thermal behavior",
+                "Spindle will run continuously.",
+                "Ensure chuck key is removed.",
+                "Monitor motor temperature manually during long tests.",
             ]
         )
 
-    def run(self, duration: int = None):
-        """Start steady-state test with optional duration."""
+    def run(self, duration: int = None, rpm: float = None):
+        """Start steady-state test with optional duration and RPM overrides."""
         if duration is not None:
             self.set_duration(duration)
+        if rpm is not None:
+            self.set_rpm(rpm)
 
         if not self.start_test():
             return
@@ -92,77 +95,148 @@ motor heats up and slip increases.""",
         self.run_sequence(self._sequence)
 
     def _sequence(self):
-        """Execute steady-state monitoring."""
-        self.log_header(f"STEADY-STATE ACCURACY TEST ({self.duration}s)")
-        self.update_progress(0, "Stabilizing at 1000 RPM...")
+        """Execute steady-state monitoring sequence."""
+        self.log_header(f"STEADY-STATE TEST ({self.duration}s @ {self.target_rpm} RPM)")
 
-        self.hal.send_mdi("M3 S1000")
-        self.log_result("Stabilizing at 1000 RPM...")
-        time.sleep(4)
+        # 1. Spin up
+        self.update_progress(0, f"Spinning up to {self.target_rpm} RPM...")
+        self.hal.send_mdi(f"M3 S{self.target_rpm}")
+        time.sleep(4)  # Allow initial settling
 
+        # Check for immediate abort
         if self.test_abort:
             self.hal.send_mdi("M5")
             self.end_test()
             return
 
-        self.log_result(f"Monitoring for {self.duration} seconds...")
-        self.update_progress(5, "Monitoring...")
+        # 2. Monitoring Loop
+        self.log_result(f"Acquiring data at 20Hz for {self.duration} seconds...")
 
-        errors = []
-        rpms = []
-        integrators = []
-        start = time.time()
+        data_points = []
+        start_time = time.time()
 
-        while time.time() - start < self.duration:
+        # 20Hz sampling = 0.05s period
+        sample_period = 0.05
+
+        while (time.time() - start_time) < self.duration:
             if self.test_abort:
                 break
 
-            errors.append(self.hal.get_pin_value(MONITOR_PINS['error']))
-            rpms.append(self.hal.get_pin_value(MONITOR_PINS['feedback']))
-            integrators.append(self.hal.get_pin_value(MONITOR_PINS['errorI']))
+            loop_start = time.time()
+            elapsed = loop_start - start_time
 
-            elapsed = time.time() - start
-            progress = 5 + (elapsed / self.duration) * 85
-            self.update_progress(progress, f"Monitoring... {elapsed:.0f}s")
+            # Capture synchronized data
+            sample = {
+                'time': elapsed,
+                'rpm': self.hal.get_pin_value(MONITOR_PINS['feedback']),
+                'error': self.hal.get_pin_value(MONITOR_PINS['error']),
+                'integrator': self.hal.get_pin_value(MONITOR_PINS['errorI'])
+            }
+            data_points.append(sample)
 
-            time.sleep(0.2)
+            # Update UI every ~500ms (every 10th sample) to reduce overhead
+            if len(data_points) % 10 == 0:
+                progress = 5 + (elapsed / self.duration) * 85
+                self.update_progress(progress, f"Monitoring... {elapsed:.1f}s")
 
+            # Precise timing sleep
+            computation_time = time.time() - loop_start
+            sleep_time = sample_period - computation_time
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+
+        # 3. Shutdown
         self.hal.send_mdi("M5")
         self.update_progress(95, "Calculating statistics...")
 
-        if not rpms or self.test_abort:
-            self.log_result("  Test aborted or no data")
+        if not data_points or self.test_abort:
+            self.log_result("  Test aborted or no data collected.")
             self.end_test()
             return
 
-        # Calculate statistics
+        # 4. Analysis
+        rpms = [d['rpm'] for d in data_points]
+        integrators = [d['integrator'] for d in data_points]
+
         stats = self.calculate_statistics(rpms)
-        integrator_drift = integrators[-1] - integrators[0]
-        ss_error = 1000.0 - stats['avg']
 
-        self.log_result(f"\nRESULTS:")
-        self.log_result(f"  Average RPM: {stats['avg']:.1f}")
-        self.log_result(f"  Std deviation: {stats['std_dev']:.2f} RPM")
-        self.log_result(f"  Min/Max: {stats['min']:.1f} / {stats['max']:.1f} RPM")
-        self.log_result(f"  Peak-to-peak: {stats['range']:.1f} RPM")
-        self.log_result(f"  Steady-state error: {ss_error:.1f} RPM")
-        self.log_result(f"  Integrator drift: {integrator_drift:+.1f}")
+        # Drift calculations
+        total_drift_i = integrators[-1] - integrators[0]
+        drift_rate_minute = total_drift_i * (60.0 / self.duration)
 
-        self.log_result(f"\nASSESSMENT (Guide §7.4):")
-        self.log_result(f"  SS Error: {self.assess_ss_error(ss_error)}")
-        self.log_result(f"  Stability: {self.assess_noise(stats['range'])}")
+        ss_error = self.target_rpm - stats['avg']
 
-        if abs(integrator_drift) > 20:
-            self.log_result(f"\n  Note: Integrator drifted {integrator_drift:+.1f}")
-            self.log_result("    (Normal - I-term compensating for motor heating)")
+        # 5. Reporting
+        self.log_result(f"\nRESULTS (@ {self.target_rpm} RPM):")
+        self.log_result(f"  Avg RPM:       {stats['avg']:.2f}")
+        self.log_result(f"  SS Error:      {ss_error:.2f} RPM (Target: {self.target_rpm})")
+        self.log_result(f"  Noise (Pk-Pk): {stats['range']:.2f} RPM")
+        self.log_result(f"  Std Dev:       {stats['std_dev']:.3f}")
+        self.log_result(f"  Integrator:    {integrators[0]:.1f} -> {integrators[-1]:.1f} (Delta: {total_drift_i:+.2f})")
+        self.log_result(f"  Drift Rate:    {drift_rate_minute:+.2f} per min")
 
-        self.update_progress(100, "Complete")
+        self.evaluate_performance(stats['range'], ss_error, total_drift_i)
 
-        if stats['range'] <= TARGETS.noise_excellent and abs(ss_error) <= TARGETS.ss_error_excellent:
-            self.log_footer("EXCELLENT")
-        elif stats['range'] <= TARGETS.noise_good and abs(ss_error) <= TARGETS.ss_error_good:
-            self.log_footer("GOOD")
-        else:
-            self.log_footer("NEEDS TUNING")
+        # 6. Save Data
+        self.save_csv_data(data_points)
 
         self.end_test()
+
+    def evaluate_performance(self, noise_pk_pk, ss_error, drift):
+        """Compare results against targets and print assessment."""
+        self.log_result("\nASSESSMENT (Guide §7.4):")
+
+        # Steady State Error Assessment
+        abs_err = abs(ss_error)
+        if abs_err < TARGETS.ss_error_excellent:
+            grade_err = "EXCELLENT"
+        elif abs_err < TARGETS.ss_error_good:
+            grade_err = "GOOD"
+        else:
+            grade_err = "FAIL - Increase I-gain"
+        self.log_result(f"  Accuracy: {grade_err}")
+
+        # Noise Assessment
+        if noise_pk_pk < TARGETS.noise_excellent:
+            grade_noise = "EXCELLENT"
+        elif noise_pk_pk < TARGETS.noise_good:
+            grade_noise = "GOOD"
+        else:
+            grade_noise = "HIGH VARIANCE - Check P-gain or mechanicals"
+        self.log_result(f"  Stability: {grade_noise}")
+
+        # Thermal Assessment
+        if self.duration > 59 and abs(drift) > 5.0:
+            self.log_result("  Thermal: I-term is actively compensating for heat (Normal behavior).")
+        elif self.duration > 59 and abs(drift) < 1.0:
+            self.log_result("  Thermal: Little to no drift detected (Check if I-gain is too low?)")
+
+        # Footer Grade
+        if "EXCELLENT" in grade_err and "EXCELLENT" in grade_noise:
+            self.log_footer("EXCELLENT")
+        elif "FAIL" in grade_err or "HIGH VARIANCE" in grade_noise:
+            self.log_footer("NEEDS TUNING")
+        else:
+            self.log_footer("GOOD")
+
+    def save_csv_data(self, data):
+        """Save time-series data to CSV for external plotting."""
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"steady_state_{int(self.target_rpm)}rpm_{timestamp}.csv"
+
+        try:
+            # Create logs directory if it doesn't exist
+            log_dir = "logs"
+            if not os.path.exists(log_dir):
+                os.makedirs(log_dir)
+
+            filepath = os.path.join(log_dir, filename)
+
+            with open(filepath, 'w', newline='') as f:
+                writer = csv.DictWriter(f, fieldnames=['time', 'rpm', 'error', 'integrator'])
+                writer.writeheader()
+                writer.writerows(data)
+
+            self.log_result(f"\n  [Data saved to {filepath}]")
+        except Exception as e:
+            self.log_result(f"\n  [Error saving CSV: {e}]")
