@@ -159,28 +159,36 @@ class DataLogger:
         return len(self.recorded_data)
     
     def export_csv(self, filepath: Path) -> bool:
-        """Export recorded data to CSV file."""
+        """
+        Export recorded data to CSV file.
+
+        Args:
+            filepath: Path to write CSV file to
+
+        Returns:
+            True if export succeeded, False if no data to export
+
+        Raises:
+            OSError: If file cannot be written
+            PermissionError: If permission denied
+        """
         if not self.recorded_data:
             return False
-        
-        try:
-            filepath = Path(filepath)
-            filepath.parent.mkdir(parents=True, exist_ok=True)
-            
-            with open(filepath, 'w', newline='') as f:
-                writer = csv.writer(f)
-                writer.writerow([
-                    'timestamp', 'time_s', 'cmd_raw', 'cmd_limited',
-                    'feedback', 'error', 'errorI', 'output', 'at_speed'
-                ])
-                
-                for point in self.recorded_data:
-                    writer.writerow(point.to_csv_row())
-            
-            return True
-        except Exception as e:
-            print(f"CSV export failed: {e}")
-            return False
+
+        filepath = Path(filepath)
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(filepath, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                'timestamp', 'time_s', 'cmd_raw', 'cmd_limited',
+                'feedback', 'error', 'errorI', 'output', 'at_speed'
+            ])
+
+            for point in self.recorded_data:
+                writer.writerow(point.to_csv_row())
+
+        return True
     
     def calculate_step_metrics(self, start_rpm: float, end_rpm: float,
                                test_data: List[Tuple[float, float]]) -> PerformanceMetrics:
