@@ -1024,6 +1024,8 @@ class HalInterface:
 
         if self.is_mock:
             with self._lock:
+                updated = 0
+
                 for name, value in params.items():
                     if name not in TUNING_PARAMS:
                         continue
@@ -1037,15 +1039,16 @@ class HalInterface:
                     min_val, max_val, step = self._get_param_bounds(name)
                     clamped_value = self._clamp_and_snap(numeric_value, min_val, max_val, step)
                     self._mock_state.params[name] = clamped_value
+                    updated += 1
                     if clamped_value != numeric_value:
                         logger.debug(
                             f"[MOCK] Adjusted {name} from {numeric_value} -> {clamped_value}"
                         )
 
-            valid_count = len(params) - len(unknown_params)
-            logger.debug(f"[MOCK] Bulk set {valid_count} params")
+            if updated:
+                logger.debug(f"[MOCK] Bulk set {updated} params")
             # Success if any known params were set
-            return valid_count > 0
+            return updated > 0
 
         try:
             # Build commands for stdin
