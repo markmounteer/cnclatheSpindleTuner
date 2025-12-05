@@ -17,7 +17,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 from collections import deque
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from typing import Dict, List, Optional, Deque, Tuple
 
 from config import UPDATE_INTERVAL_MS, HISTORY_DURATION_S
@@ -42,6 +42,7 @@ class PerformanceMetrics:
 class DataPoint:
     """Single data point for logging."""
     timestamp: float
+    relative_time: float  # Added to fix CSV export time axis
     cmd_raw: float
     cmd_limited: float
     feedback: float
@@ -49,11 +50,11 @@ class DataPoint:
     errorI: float
     output: float
     at_speed: bool
-    
+
     def to_csv_row(self) -> List:
         return [
             datetime.fromtimestamp(self.timestamp).isoformat(),
-            f"{self.timestamp - int(self.timestamp):.3f}",
+            f"{self.relative_time:.3f}",  # Fixed: Use relative time instead of fractional seconds
             f"{self.cmd_raw:.1f}",
             f"{self.cmd_limited:.1f}",
             f"{self.feedback:.1f}",
@@ -116,6 +117,7 @@ class DataLogger:
         if self.recording:
             point = DataPoint(
                 timestamp=now,
+                relative_time=relative_time,  # Pass calculated relative time
                 cmd_raw=values.get('cmd_raw', 0),
                 cmd_limited=values.get('cmd_limited', 0),
                 feedback=values.get('feedback', 0),
@@ -175,20 +177,24 @@ class DataLogger:
         if not self.recorded_data:
             return False
 
-        filepath = Path(filepath)
-        filepath.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            filepath = Path(filepath)
+            filepath.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(filepath, 'w', newline='', encoding='utf-8') as f:
-            writer = csv.writer(f)
-            writer.writerow([
-                'timestamp', 'time_s', 'cmd_raw', 'cmd_limited',
-                'feedback', 'error', 'errorI', 'output', 'at_speed'
-            ])
+            with open(filepath, 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    'timestamp', 'time_s', 'cmd_raw', 'cmd_limited',
+                    'feedback', 'error', 'errorI', 'output', 'at_speed'
+                ])
 
-            for point in self.recorded_data:
-                writer.writerow(point.to_csv_row())
+                for point in self.recorded_data:
+                    writer.writerow(point.to_csv_row())
 
-        return True
+            return True
+        except Exception as e:
+            print(f"CSV export failed: {e}")
+            return False
     
     def calculate_step_metrics(self, start_rpm: float, end_rpm: float,
                                test_data: List[Tuple[float, float]]) -> PerformanceMetrics:
@@ -216,34 +222,31 @@ class DataLogger:
         step_start_time = test_data[0][0]
         
         # Calculate thresholds
-        rpm_10 = start_rpm + 0.1 * step_size
-        rpm_90 = start_rpm + 0.9 * step_size
-        rpm_98 = start_rpm + 0.98 * step_size
-        rpm_102 = start_rpm + 1.02 * step_size
+        # Fixed: Use min/max to handle negative steps (deceleration) correctly
+        limit_a = start_rpm + 0.98 * step_size
+        limit_b = start_rpm + 1.02 * step_size
+        rpm_lower_bound = min(limit_a, limit_b)
+        rpm_upper_bound = max(limit_a, limit_b)
 
-        lower_band = min(rpm_98, rpm_102)
-        upper_band = max(rpm_98, rpm_102)
-        
-        # Find rise time (10% to 90%) using threshold crossings
+        # For rise time (10% to 90%)
+        limit_10 = start_rpm + 0.1 * step_size
+        limit_90 = start_rpm + 0.9 * step_size
+
+        # Handle direction for rise time logic
+        ascending = end_rpm > start_rpm
+
+        # Find rise time
         time_10 = None
         time_90 = None
-        previous_rpm = start_rpm
 
         for t, rpm in test_data:
-            if step_size > 0:
-                crossed_10 = previous_rpm < rpm_10 <= rpm
-                crossed_90 = previous_rpm < rpm_90 <= rpm
-            else:
-                crossed_10 = previous_rpm > rpm_10 >= rpm
-                crossed_90 = previous_rpm > rpm_90 >= rpm
-
-            if time_10 is None and crossed_10:
-                time_10 = t
-            if time_10 is not None and time_90 is None and crossed_90:
-                time_90 = t
-                break
-
-            previous_rpm = rpm
+            if time_10 is None:
+                if (ascending and rpm >= limit_10) or (not ascending and rpm <= limit_10):
+                    time_10 = t
+            if time_90 is None:
+                if (ascending and rpm >= limit_90) or (not ascending and rpm <= limit_90):
+                    time_90 = t
+                    break
 
         if time_10 is not None and time_90 is not None:
             metrics.rise_time_s = time_90 - time_10
@@ -253,42 +256,40 @@ class DataLogger:
         in_band_since = None
 
         for t, rpm in test_data:
-            in_band = lower_band <= rpm <= upper_band
+            # Fixed: Use corrected bounds
+            in_band = rpm_lower_bound <= rpm <= rpm_upper_bound
+
             if in_band:
                 if in_band_since is None:
                     in_band_since = t
             else:
                 in_band_since = None
 
-        last_time = test_data[-1][0]
-        if in_band_since is not None and (last_time - in_band_since) >= 0.5:
-            settling_time = in_band_since - step_start_time
+            # Require 0.5s in band to count as settled
+            if in_band_since is not None and (t - in_band_since) >= 0.5:
+                settling_time = in_band_since - step_start_time
+                break
 
         if settling_time is not None:
             metrics.settling_time_s = settling_time
         
-        # Calculate overshoot (handles accel and decel steps)
-        peak_rpm = max(rpm for _, rpm in test_data)
-        min_rpm = min(rpm for _, rpm in test_data)
-
-        overshoot = 0.0
-        if step_size > 0:
+        # Calculate overshoot
+        # Note: Overshoot is deviation *beyond* the target
+        if ascending:
+            peak_rpm = max(rpm for _, rpm in test_data)
             overshoot = peak_rpm - end_rpm
-        elif step_size < 0:
-            overshoot = end_rpm - min_rpm
+        else:
+            peak_rpm = min(rpm for _, rpm in test_data)
+            overshoot = end_rpm - peak_rpm # Positive value for overshoot
 
         if overshoot > 0:
             metrics.overshoot_pct = (overshoot / abs(step_size)) * 100
-        
-        # Calculate max error across the full response
-        errors = [rpm - end_rpm for _, rpm in test_data]
-        if errors:
-            metrics.max_error = max(abs(e) for e in errors)
 
-            # Use the final portion of data to calculate signed steady-state error
-            window_size = min(20, len(errors))
-            steady_state_slice = errors[-window_size:]
-            metrics.steady_state_error = sum(steady_state_slice) / len(steady_state_slice)
+        # Calculate max error
+        errors = [abs(rpm - end_rpm) for _, rpm in test_data[-50:]]  # Last ~5 seconds
+        if errors:
+            metrics.max_error = max(errors)
+            metrics.steady_state_error = sum(errors) / len(errors)
         
         return metrics
     
