@@ -151,14 +151,13 @@ class DataLogger:
             )
 
     def clear_buffers(self) -> None:
-        """Clear all plot buffers (and reset the relative timer)."""
+        """Clear all plot buffers without altering the session clock."""
         with self._lock:
             self.time_buffer.clear()
             self.cmd_buffer.clear()
             self.feedback_buffer.clear()
             self.error_buffer.clear()
             self.errorI_buffer.clear()
-            self._start_time_mono = None
 
     def clear_recording(self) -> None:
         """Clear recorded data (export history)."""
@@ -240,13 +239,13 @@ class DataLogger:
         self,
         start_rpm: float,
         end_rpm: float,
-        test_data: List[Dict[str, float]],
+        test_data: List[Any],
     ) -> PerformanceMetrics:
         """
         Compute step response metrics.
 
         test_data entries must include:
-            'time' (seconds), 'feedback' (rpm), 'error' (rpm)
+            'relative_time' (seconds), 'feedback' (rpm), 'error' (rpm)
 
         Sentinel values:
             rise_time_s / settling_time_s = -1.0 if not determinable.
@@ -260,8 +259,13 @@ class DataLogger:
             return metrics
 
         # Ensure monotonic ordering (robust against duplicates / slight disorder).
-        data = sorted(test_data, key=lambda p: p.get("time", 0.0))
-        step_start_time = float(data[0].get("time", 0.0))
+        def _get_value(point: Any, key: str, default: float = 0.0) -> float:
+            if isinstance(point, dict):
+                return float(point.get(key, default))
+            return float(getattr(point, key, default))
+
+        data = sorted(test_data, key=lambda p: _get_value(p, "relative_time", 0.0))
+        step_start_time = _get_value(data[0], "relative_time", 0.0)
 
         rpm_10 = start_rpm + 0.1 * step_size
         rpm_90 = start_rpm + 0.9 * step_size
@@ -273,15 +277,16 @@ class DataLogger:
         time_10: Optional[float] = None
         time_90: Optional[float] = None
 
-        peak_rpm = -float("inf") if step_size > 0 else float("inf")
-        prev_t: Optional[float] = None
-        prev_rpm: Optional[float] = None
-        prev_abs_error: Optional[float] = None
+        prev_t = _get_value(data[0], "relative_time", 0.0)
+        prev_rpm = _get_value(data[0], "feedback", 0.0)
+        prev_abs_error = abs(_get_value(data[0], "error", 0.0))
 
-        for point in data:
-            t = float(point.get("time", 0.0))
-            rpm = float(point.get("feedback", 0.0))
-            abs_error = abs(float(point.get("error", 0.0)))
+        peak_rpm = prev_rpm
+
+        for point in data[1:]:
+            t = _get_value(point, "relative_time", 0.0)
+            rpm = _get_value(point, "feedback", 0.0)
+            abs_error = abs(_get_value(point, "error", 0.0))
 
             # Peak detection
             if step_size > 0:
@@ -292,28 +297,26 @@ class DataLogger:
                     peak_rpm = rpm
 
             # IAE: trapezoidal integration; ignore non-increasing dt
-            if prev_t is not None and prev_abs_error is not None:
-                dt = t - prev_t
-                if dt > 0:
-                    metrics.iae += 0.5 * (prev_abs_error + abs_error) * dt
+            dt = t - prev_t
+            if dt > 0:
+                metrics.iae += 0.5 * (prev_abs_error + abs_error) * dt
 
             # Rise time interpolation
-            if prev_t is not None and prev_rpm is not None:
-                if time_10 is None:
-                    crossed_10 = (
-                        (step_size > 0 and prev_rpm <= rpm_10 <= rpm)
-                        or (step_size < 0 and prev_rpm >= rpm_10 >= rpm)
-                    )
-                    if crossed_10:
-                        time_10 = self._interpolate_time(prev_t, prev_rpm, t, rpm, rpm_10)
+            if time_10 is None:
+                crossed_10 = (
+                    (step_size > 0 and prev_rpm <= rpm_10 <= rpm)
+                    or (step_size < 0 and prev_rpm >= rpm_10 >= rpm)
+                )
+                if crossed_10:
+                    time_10 = self._interpolate_time(prev_t, prev_rpm, t, rpm, rpm_10)
 
-                if time_90 is None:
-                    crossed_90 = (
-                        (step_size > 0 and prev_rpm <= rpm_90 <= rpm)
-                        or (step_size < 0 and prev_rpm >= rpm_90 >= rpm)
-                    )
-                    if crossed_90:
-                        time_90 = self._interpolate_time(prev_t, prev_rpm, t, rpm, rpm_90)
+            if time_90 is None:
+                crossed_90 = (
+                    (step_size > 0 and prev_rpm <= rpm_90 <= rpm)
+                    or (step_size < 0 and prev_rpm >= rpm_90 >= rpm)
+                )
+                if crossed_90:
+                    time_90 = self._interpolate_time(prev_t, prev_rpm, t, rpm, rpm_90)
 
             prev_t, prev_rpm, prev_abs_error = t, rpm, abs_error
 
@@ -330,15 +333,17 @@ class DataLogger:
             metrics.overshoot_pct = (overshoot / abs(step_size) * 100.0) if overshoot > 0 else 0.0
 
         # Settling time: time after which signal stays within the band
-        final_rpm = float(data[-1].get("feedback", 0.0))
+        final_rpm = _get_value(data[-1], "feedback", 0.0)
         if lower_band <= final_rpm <= upper_band:
             settle_time: Optional[float] = None
 
             # Find last out-of-band index; settle_time is the *next* sample’s time.
             for i in range(len(data) - 1, -1, -1):
-                rpm = float(data[i].get("feedback", 0.0))
+                rpm = _get_value(data[i], "feedback", 0.0)
                 if not (lower_band <= rpm <= upper_band):
-                    settle_time = float(data[min(i + 1, len(data) - 1)].get("time", step_start_time))
+                    settle_time = _get_value(
+                        data[min(i + 1, len(data) - 1)], "relative_time", step_start_time
+                    )
                     break
 
             if settle_time is None:
@@ -350,14 +355,14 @@ class DataLogger:
             metrics.settling_time_s = -1.0
 
         # Max error always computable
-        metrics.max_error = max(abs(float(p.get("error", 0.0))) for p in data)
+        metrics.max_error = max(abs(_get_value(p, "error", 0.0)) for p in data)
 
         # Steady-state error: average over last 1.0 second (bounded by step start)
-        end_time = float(data[-1].get("time", 0.0))
+        end_time = _get_value(data[-1], "relative_time", 0.0)
         ss_start = max(step_start_time, end_time - 1.0)
-        ss_points = [p for p in data if float(p.get("time", 0.0)) >= ss_start]
+        ss_points = [p for p in data if _get_value(p, "relative_time", 0.0) >= ss_start]
         if ss_points:
-            avg_rpm = sum(float(p.get("feedback", 0.0)) for p in ss_points) / len(ss_points)
+            avg_rpm = sum(_get_value(p, "feedback", 0.0) for p in ss_points) / len(ss_points)
             metrics.steady_state_error = end_rpm - avg_rpm
 
         return metrics
@@ -379,8 +384,10 @@ class DataLogger:
 
         metrics = PerformanceMetrics()
 
-        # Single-pass min search (time, rpm)
-        min_idx, (min_time, min_rpm) = min(enumerate(test_data), key=lambda x: x[1][1])
+        # Find point with largest deviation from target RPM
+        min_idx, (min_time, min_rpm) = max(
+            enumerate(test_data), key=lambda x: abs(float(x[1][1]) - target_rpm)
+        )
         droop = abs(target_rpm - float(min_rpm))
         if droop <= 5.0:
             return metrics
