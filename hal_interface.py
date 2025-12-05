@@ -298,9 +298,9 @@ class MockPhysicsEngine:
         
         # Low-pass filter on feedback (simulates actual filtering in HAL)
         # Use params (user-adjustable) with physics default as fallback
-        # Clamp to valid range [0.0, 1.0] to prevent filter instability
+        # Clamp to valid range [0.1, 1.0] to prevent filter freezing (0 = no update)
         filter_gain = params.get('FilterGain', self.physics.filter_gain)
-        filter_gain = max(0.0, min(1.0, filter_gain))
+        filter_gain = max(0.1, min(1.0, filter_gain))
         self.state.rpm_filtered = (self.state.rpm_filtered * (1 - filter_gain) +
                                    (current_rpm + noise) * filter_gain)
         
