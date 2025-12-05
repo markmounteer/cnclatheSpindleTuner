@@ -10,8 +10,10 @@ Contains common functionality for all test modules:
 
 import time
 from dataclasses import dataclass
-from typing import List, Tuple, Callable, Optional, Dict
+from typing import Callable, Dict, List, Optional, Tuple
 from abc import ABC, abstractmethod
+
+from logger import PerformanceMetrics
 
 
 # =============================================================================
@@ -288,32 +290,21 @@ class BaseTest(ABC):
     # =========================================================================
 
     def calculate_step_metrics(self, start: int, end: int,
-                               data: List[Dict]) -> Dict[str, float]:
-        """
-        Calculate step response metrics.
+                               data: List[Dict]) -> PerformanceMetrics:
+        """Calculate step response metrics using the shared DataLogger logic."""
+        logger_calc = getattr(self.logger, "calculate_step_metrics", None)
+        if callable(logger_calc):
+            return logger_calc(start, end, data)
 
-        Args:
-            start: Starting RPM
-            end: Target RPM
-            data: List of sample dictionaries with 'time' and 'feedback' keys
-
-        Returns:
-            Dictionary with rise_time, settling_time, overshoot, ss_error, max_error
-        """
+        # Fallback to legacy calculation if the logger does not implement it.
+        metrics = PerformanceMetrics()
         step_size = abs(end - start)
         feedbacks = [d.get('feedback', 0) for d in data]
         times = [d.get('time', 0) for d in data]
 
         if not feedbacks or not times:
-            return {
-                'rise_time': 0,
-                'settling_time': 0,
-                'overshoot': 0,
-                'ss_error': 0,
-                'max_error': 0,
-            }
+            return metrics
 
-        # Rise time (10% to 90%)
         threshold_10 = start + 0.1 * (end - start)
         threshold_90 = start + 0.9 * (end - start)
 
@@ -327,9 +318,9 @@ class BaseTest(ABC):
                 t_90 = t
                 break
 
-        rise_time = (t_90 - t_10) if (t_10 is not None and t_90 is not None) else 0
+        if t_10 is not None and t_90 is not None:
+            metrics.rise_time_s = t_90 - t_10
 
-        # Settling time (2% of target)
         tolerance = 0.02 * abs(end)
         settling_time = times[-1]
 
@@ -341,7 +332,8 @@ class BaseTest(ABC):
         else:
             settling_time = times[0] if times else 0
 
-        # Overshoot
+        metrics.settling_time_s = settling_time
+
         if end > start:
             max_fb = max(feedbacks)
             overshoot = max(0, (max_fb - end) / step_size * 100)
@@ -349,24 +341,16 @@ class BaseTest(ABC):
             min_fb = min(feedbacks)
             overshoot = max(0, (end - min_fb) / step_size * 100)
 
-        # Steady-state error (average of last second)
+        metrics.overshoot_pct = overshoot
+
         last_second = [d for d in data if d.get('time', 0) > times[-1] - 1.0]
         if last_second:
             ss_fb = sum(d.get('feedback', 0) for d in last_second) / len(last_second)
-            ss_error = end - ss_fb
-        else:
-            ss_error = 0
+            metrics.steady_state_error = end - ss_fb
 
-        # Maximum error during step
-        max_error = max(abs(d.get('error', 0)) for d in data) if data else 0
+        metrics.max_error = max(abs(d.get('error', 0)) for d in data) if data else 0
 
-        return {
-            'rise_time': rise_time,
-            'settling_time': settling_time,
-            'overshoot': overshoot,
-            'ss_error': ss_error,
-            'max_error': max_error,
-        }
+        return metrics
 
     def calculate_statistics(self, values: List[float]) -> Dict[str, float]:
         """

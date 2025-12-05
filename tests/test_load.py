@@ -132,13 +132,9 @@ when prompted, then release to measure recovery.""",
 
         self.update_progress(85, "Calculating recovery...")
 
-        # Find recovery time
-        recovery_time = None
-        if droop_time:
-            for t, fb in samples:
-                if t > droop_time and abs(fb - baseline) < 20:
-                    recovery_time = t - droop_time
-                    break
+        # Calculate recovery metrics using shared logger logic
+        metrics = self.logger.calculate_load_metrics(samples, baseline)
+        recovery_time = metrics.load_recovery_time_s if metrics.load_recovery_time_s > 0 else None
 
         self.log_result(f"\nResults:")
         self.log_result(f"  Baseline: {baseline:.0f} RPM")
