@@ -1,23 +1,36 @@
 """
 Spindle Tuner - Base Test Class
 
-Common functionality for all spindle-tuner *procedure tests*:
+Common functionality for all spindle-tuner procedure tests:
 - Performance targets (Guide §7.4)
-- Signal sampling utilities
+- Signal sampling utilities (with drift correction)
 - Assessment helpers
 - Test lifecycle management (start/end/abort)
 """
 
 from __future__ import annotations
 
+import logging
 import math
 import threading
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional, Protocol, Sequence, Tuple
+from typing import (
+    Callable,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    Protocol,
+    Sequence,
+    Tuple,
+)
 
 from logger import PerformanceMetrics
+
+
+logger = logging.getLogger(__name__)
 
 
 class HalProtocol(Protocol):
@@ -31,7 +44,7 @@ class HalProtocol(Protocol):
 
 
 class DataLoggerProtocol(Protocol):
-    """Optional protocol – base class only stores it, tests may call it."""
+    """Protocol for data logging backends."""
 
     def log_sample(self, sample: Dict[str, float]) -> None: ...
 
@@ -110,7 +123,7 @@ class BaseTest(ABC):
         data_logger: DataLoggerProtocol,
         log_callback: Optional[Callable[[str], None]] = None,
         progress_callback: Optional[Callable[[float, str], None]] = None,
-    ):
+    ) -> None:
         self.hal = hal_interface
         self.logger = data_logger
         self.log_callback = log_callback
@@ -120,6 +133,9 @@ class BaseTest(ABC):
         self.test_abort = False
 
         self._started_at: Optional[float] = None  # monotonic timestamp
+
+        # Lock to ensure thread safety when modifying running state
+        self._lock = threading.RLock()
 
     # -------------------------------------------------------------------------
     # REQUIRED OVERRIDES
@@ -131,7 +147,7 @@ class BaseTest(ABC):
         """Return detailed description of the test."""
 
     @abstractmethod
-    def run(self):
+    def run(self) -> None:
         """Execute the test sequence."""
 
     # -------------------------------------------------------------------------
@@ -139,10 +155,13 @@ class BaseTest(ABC):
     # -------------------------------------------------------------------------
 
     def log_result(self, text: str) -> None:
+        """Log to the UI callback and system logger."""
+        logger.info("[%s] %s", self.TEST_NAME, text)
         if self.log_callback:
             self.log_callback(text)
 
     def update_progress(self, percent: float, message: str = "") -> None:
+        """Update UI progress bar."""
         if self.progress_callback:
             self.progress_callback(percent, message)
 
@@ -163,39 +182,47 @@ class BaseTest(ABC):
     # -------------------------------------------------------------------------
 
     def start_test(self) -> bool:
-        """Return False if another test is already running."""
+        """
+        Mark test as running.
 
-        if self.test_running:
-            return False
-        self.test_running = True
-        self.test_abort = False
-        self._started_at = time.monotonic()
-        return True
+        Returns False if a test is already in progress.
+        """
+
+        with self._lock:
+            if self.test_running:
+                return False
+            self.test_running = True
+            self.test_abort = False
+            self._started_at = time.monotonic()
+            return True
 
     def end_test(self) -> None:
-        self.test_running = False
-        self.test_abort = False
-        self._started_at = None
+        """Mark test as finished."""
+        with self._lock:
+            self.test_running = False
+            self.test_abort = False
+            self._started_at = None
 
     def safe_stop_spindle(self) -> None:
-        """Best-effort spindle stop; never raises."""
+        """Best-effort spindle stop with error reporting."""
 
         try:
             self.hal.send_mdi("M5")
-        except Exception:
-            # We intentionally swallow exceptions here to make cleanup reliable.
-            pass
+        except (RuntimeError, ValueError, Exception) as exc:  # pragma: no cover - hardware safety
+            self.log_result(f"CRITICAL: failed to stop spindle via MDI: {exc}")
 
     def abort(self) -> None:
-        """Signal test to abort and attempt to stop the spindle."""
+        """Signal test to abort and immediately attempt to stop the spindle."""
 
-        if not self.test_running:
-            return
-        self.test_abort = True
+        with self._lock:
+            if not self.test_running:
+                return
+            self.test_abort = True
         self.log_result("\n>>> ABORT REQUESTED - stopping spindle...")
         self.safe_stop_spindle()
 
     def check_abort(self) -> bool:
+        """Check if an abort has been requested."""
         return self.test_abort
 
     def run_sequence(self, sequence: Callable[[], None]) -> None:
@@ -218,11 +245,32 @@ class BaseTest(ABC):
     # SIGNAL SAMPLING
     # -------------------------------------------------------------------------
 
-    def _sleep_until(self, target_t: float) -> None:
-        now = time.monotonic()
-        delay = target_t - now
-        if delay > 0:
-            time.sleep(delay)
+    def _sampling_loop(self, duration: float, interval: float) -> Iterator[float]:
+        """Yield elapsed time values while enforcing drift-corrected intervals."""
+
+        if duration <= 0:
+            return
+        if interval <= 0:
+            raise ValueError("interval must be > 0")
+
+        t0 = time.monotonic()
+        end_t = t0 + duration
+        next_t = t0
+
+        while True:
+            if self.check_abort():
+                break
+
+            now = time.monotonic()
+            if now >= end_t:
+                break
+
+            yield now - t0
+
+            next_t += interval
+            delay = next_t - time.monotonic()
+            if delay > 0:
+                time.sleep(delay)
 
     def sample_signal(
         self,
@@ -237,37 +285,18 @@ class BaseTest(ABC):
             (times, samples) where times are seconds since sampling started.
         """
 
-        if duration <= 0:
-            return [], []
-        if interval <= 0:
-            raise ValueError("interval must be > 0")
-
-        t0 = time.monotonic()
-        end_t = t0 + duration
-        next_t = t0
-
         times: List[float] = []
         samples: List[float] = []
 
-        while True:
-            if self.test_abort:
-                break
-
-            now = time.monotonic()
-            if now >= end_t:
-                break
-
+        for elapsed_t in self._sampling_loop(duration, interval):
             try:
                 val = float(self.hal.get_pin_value(pin_name))
             except Exception as exc:  # pragma: no cover - UI flow
                 self.log_result(f"WARNING: failed reading '{pin_name}': {exc}")
                 val = float("nan")
 
-            times.append(now - t0)
+            times.append(elapsed_t)
             samples.append(val)
-
-            next_t += interval
-            self._sleep_until(next_t)
 
         return times, samples
 
@@ -283,31 +312,12 @@ class BaseTest(ABC):
             A list of dicts. Each dict includes a 'time' key (seconds since start).
         """
 
-        if duration <= 0:
-            return []
-        if interval <= 0:
-            raise ValueError("interval must be > 0")
-
-        t0 = time.monotonic()
-        end_t = t0 + duration
-        next_t = t0
-
         samples: List[Dict[str, float]] = []
 
-        while True:
-            if self.test_abort:
-                break
-
-            now = time.monotonic()
-            if now >= end_t:
-                break
-
+        for elapsed_t in self._sampling_loop(duration, interval):
             values = self.hal.get_all_values()
-            values["time"] = float(now - t0)
+            values["time"] = float(elapsed_t)
             samples.append(values)
-
-            next_t += interval
-            self._sleep_until(next_t)
 
         return samples
 
@@ -362,52 +372,51 @@ class BaseTest(ABC):
         data: Sequence[Dict[str, float]],
         ss_window_s: float = 1.0,
     ) -> PerformanceMetrics:
-        """
-        Calculate step response metrics from sampled data.
-
-        Expects each sample dict to include:
-            - 'time' (seconds)
-            - 'feedback' (RPM)
-        Optionally:
-            - 'error' (RPM)
-        """
+        """Calculate step response metrics from sampled data."""
 
         metrics = PerformanceMetrics()
         if not data:
             return metrics
 
-        times: List[float] = []
-        feedbacks: List[float] = []
-        errors: List[float] = []
-
-        for d in data:
-            if "time" not in d:
-                continue
-            t = float(d.get("time", 0.0))
-            fb = float(d.get("feedback", 0.0))
-            times.append(t)
-            feedbacks.append(fb)
-            if "error" in d:
-                errors.append(abs(float(d.get("error", 0.0))))
+        times = [float(d.get("time", 0.0)) for d in data if "time" in d]
+        feedbacks = [float(d.get("feedback", 0.0)) for d in data if "time" in d]
 
         if not times or not feedbacks:
             return metrics
 
         step_size = abs(end - start)
+
         if math.isclose(step_size, 0.0, abs_tol=1e-9):
-            metrics.steady_state_error = end - feedbacks[-1]
-            metrics.max_error = max(errors) if errors else abs(end - feedbacks[-1])
+            final_fb = feedbacks[-1]
+            metrics.steady_state_error = end - final_fb
+            metrics.max_error = self._calculate_max_error(data, feedbacks, end)
             return metrics
 
+        metrics.rise_time_s = self._calculate_rise_time(times, feedbacks, start, end)
+        metrics.settling_time_s = self._calculate_settling_time(times, feedbacks, end, step_size)
+        metrics.overshoot_pct = self._calculate_overshoot(feedbacks, start, end, step_size)
+        metrics.steady_state_error = self._calculate_steady_state_error(times, feedbacks, end, ss_window_s)
+        metrics.max_error = self._calculate_max_error(data, feedbacks, end)
+
+        return metrics
+
+    def _calculate_rise_time(
+        self, times: List[float], feedbacks: List[float], start: float, end: float
+    ) -> float:
+        """Calculate time to go from 10% to 90% of the step."""
+
         direction = 1 if end > start else -1
-        thr_10 = start + 0.1 * (end - start)
-        thr_90 = start + 0.9 * (end - start)
+        step_delta = end - start
+
+        thr_10 = start + 0.1 * step_delta
+        thr_90 = start + 0.9 * step_delta
+
+        t10: Optional[float] = None
+        t90: Optional[float] = None
 
         def crossed(val: float, thr: float) -> bool:
             return val >= thr if direction > 0 else val <= thr
 
-        t10: Optional[float] = None
-        t90: Optional[float] = None
         for t, fb in zip(times, feedbacks):
             if t10 is None and crossed(fb, thr_10):
                 t10 = t
@@ -415,45 +424,64 @@ class BaseTest(ABC):
                 t90 = t
                 break
 
-        metrics.rise_time_s = (t90 - t10) if (t10 is not None and t90 is not None) else 0.0
+        return (t90 - t10) if (t10 is not None and t90 is not None) else 0.0
 
-        tolerance = max(0.02 * abs(end), 0.02 * step_size, 1.0)
+    def _calculate_settling_time(
+        self, times: List[float], feedbacks: List[float], target: float, step_size: float
+    ) -> float:
+        """Calculate time to stay within 2% band of target."""
 
-        last_oot = None
+        tolerance = max(0.02 * step_size, 1.0)
+        last_out_of_tol_idx = -1
+
         for i, fb in enumerate(feedbacks):
-            if abs(fb - end) > tolerance:
-                last_oot = i
+            if abs(fb - target) > tolerance:
+                last_out_of_tol_idx = i
 
-        if last_oot is None:
-            settling_time = 0.0
-        elif last_oot + 1 < len(times):
-            settling_time = times[last_oot + 1]
-        else:
-            settling_time = times[-1]
+        if last_out_of_tol_idx == -1:
+            return 0.0
+        if last_out_of_tol_idx + 1 < len(times):
+            return times[last_out_of_tol_idx + 1]
+        return times[-1]
 
-        metrics.settling_time_s = float(settling_time)
+    def _calculate_overshoot(
+        self, feedbacks: List[float], start: float, target: float, step_size: float
+    ) -> float:
+        """Calculate percentage overshoot."""
 
-        if direction > 0:
+        if target > start:
             peak = max(feedbacks)
-            overshoot = max(0.0, (peak - end) / step_size * 100.0)
+            overshoot = peak - target
         else:
             trough = min(feedbacks)
-            overshoot = max(0.0, (end - trough) / step_size * 100.0)
+            overshoot = target - trough
 
-        metrics.overshoot_pct = float(overshoot)
+        return max(0.0, (overshoot / step_size) * 100.0)
+
+    def _calculate_steady_state_error(
+        self, times: List[float], feedbacks: List[float], target: float, window_s: float
+    ) -> float:
+        """Calculate average error over the last window_s seconds."""
 
         t_end = times[-1]
-        t_start = t_end - max(ss_window_s, 0.0)
-        tail = [fb for t, fb in zip(times, feedbacks) if t >= t_start] or [feedbacks[-1]]
-        ss_fb = sum(tail) / len(tail)
-        metrics.steady_state_error = float(end - ss_fb)
+        t_start_window = t_end - max(window_s, 0.0)
 
-        if errors:
-            metrics.max_error = max(errors)
-        else:
-            metrics.max_error = max(abs(fb - end) for fb in feedbacks)
+        tail = [fb for t, fb in zip(times, feedbacks) if t >= t_start_window]
+        if not tail:
+            tail = [feedbacks[-1]]
 
-        return metrics
+        avg_fb = sum(tail) / len(tail)
+        return float(target - avg_fb)
+
+    def _calculate_max_error(
+        self, data: Sequence[Dict[str, float]], feedbacks: List[float], target: float
+    ) -> float:
+        """Calculate the maximum absolute error present in the data."""
+
+        if data and "error" in data[0]:
+            errors = [abs(float(d.get("error", 0.0))) for d in data]
+            return max(errors)
+        return max(abs(fb - target) for fb in feedbacks)
 
     def calculate_statistics(self, values: Sequence[float]) -> Dict[str, float]:
         """Basic stats with a safe empty-handling path."""
