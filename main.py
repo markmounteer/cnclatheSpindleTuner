@@ -22,7 +22,7 @@ from config import APP_TITLE, APP_VERSION, UPDATE_INTERVAL_MS
 from hal import HalInterface, IniFileHandler, ConnectionState
 from logger import DataLogger
 from dashboard import DashboardTab
-from tests import TestsTab, ChecklistsTab
+from tests import TestsTab, ChecklistsTab  # Now imports from tests/ package
 from troubleshooter import TroubleshooterTab
 from export import ExportTab
 
