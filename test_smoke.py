@@ -42,8 +42,26 @@ class TestImports:
         from tests.test_watchdog import WatchdogTest
 
         # Verify they have required methods
-        assert hasattr(SignalChainTest, 'get_description')
-        assert hasattr(SignalChainTest, 'run')
+        test_classes = [
+            SignalChainTest,
+            PreflightTest,
+            EncoderTest,
+            OpenLoopTest,
+            ForwardTest,
+            ReverseTest,
+            RateLimitTest,
+            StepTest,
+            LoadTest,
+            SteadyStateTest,
+            DecelTest,
+            RampTest,
+            FullSuiteTest,
+            WatchdogTest,
+        ]
+
+        for cls in test_classes:
+            assert hasattr(cls, 'get_description'), f"{cls.__name__} missing get_description"
+            assert hasattr(cls, 'run'), f"{cls.__name__} missing run"
 
     def test_import_logger(self):
         """Logger module should import without error."""
@@ -80,3 +98,4 @@ class TestConfiguration:
         assert TARGETS.settling_excellent > 0
         assert TARGETS.settling_good >= TARGETS.settling_excellent
         assert TARGETS.overshoot_excellent >= 0
+        assert TARGETS.overshoot_good >= TARGETS.overshoot_excellent
