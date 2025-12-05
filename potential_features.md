@@ -1,7 +1,7 @@
 # Potential Features Register
 **Directory:** /home/user/cnclatheSpindleTuner/
-**Last Updated:** 2025-12-06 00:30 UTC
-**Total Entries:** 18 | **New:** 18 | **Under Review:** 0 | **Resolved:** 0
+**Last Updated:** 2025-12-06 00:50 UTC
+**Total Entries:** 17 | **New:** 17 | **Under Review:** 0 | **Resolved:** 0
 
 ## Summary Index
 | ID | Status | Priority | Source File | Title | Submitted |
@@ -10,7 +10,6 @@
 | FEAT-20251205-004 | 🆕 New | 🟢 Low | dashboard.py | Fallback Chart Error Trace Scaling Indicator | 2025-12-05 |
 | FEAT-20251205-005 | 🆕 New | 🟢 Low | dashboard.py | Keyboard Shortcut Help Overlay | 2025-12-05 |
 | FEAT-20251205-007 | 🆕 New | 🟢 Low | hal_interface.py | Add `__all__` Export List | 2025-12-05 |
-| FEAT-20251205-008 | 🆕 New | 🟡 Medium | hal_interface.py | Implement Optional HAL Reconnection Attempts | 2025-12-05 |
 | FEAT-20251205-009 | 🆕 New | 🟡 Medium | config.py | Split into Config Package | 2025-12-05 |
 | FEAT-20251205-010 | 🆕 New | 🟡 Medium | config.py | Replace TypedDicts with Dataclasses | 2025-12-05 |
 | FEAT-20251205-011 | 🆕 New | 🟢 Low | config.py | Use Enums for Categorical Values | 2025-12-05 |
@@ -149,33 +148,6 @@
 
 ---
 
-### FEAT-20251205-008 Implement Optional HAL Reconnection Attempts
-
-| Field | Value |
-|-------|-------|
-| Status | 🆕 New |
-| Source File | hal_interface.py |
-| Location | Connection handling |
-| Submitted By | Code Review Agent |
-| Submitted | 2025-12-05 |
-| Priority | 🟡 Medium |
-| Duplicate Of | N/A |
-
-**Description:** Attempt HAL reconnection a configurable number of times before falling back to mock mode.
-
-**Context:** On connection failure the module immediately switches to mock mode without retries.
-
-**Rationale:** Limited retry attempts could recover from transient issues while retaining the mock fallback.
-
-**Implementation Considerations:**
-- Add configurable retry count and delay.
-- Ensure retries do not block the UI excessively.
-- Preserve the existing mock fallback path when retries are exhausted.
-
-**Review History:**
-- 2025-12-05 | System | Entry migrated to standardized register format.
-
----
 
 ### FEAT-20251205-009 Split into Config Package
 ### FEAT-20251205-009 Split Module Into Smaller Components

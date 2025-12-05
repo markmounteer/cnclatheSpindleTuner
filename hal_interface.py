@@ -441,12 +441,14 @@ class HalInterface:
     # Cache TTL in seconds
     CACHE_TTL = 0.05  # 50ms cache validity
     
-    def __init__(self, mock: bool = False):
+    def __init__(self, mock: bool = False, *, connect_retries: int = 2, retry_delay: float = 0.5):
         """
         Initialize HAL interface.
-        
+
         Args:
             mock: Force mock mode even if HAL is available
+            connect_retries: Number of additional halcmd verification attempts before falling back to mock
+            retry_delay: Seconds to wait between halcmd verification attempts
         """
         self._lock = threading.RLock()
         self._cache: Dict[str, CachedValue] = {}
@@ -471,6 +473,10 @@ class HalInterface:
         self._mock_update_interval = UPDATE_INTERVAL_MS / 1000.0
         self._forced_mock = False
         self._mock_fallback_active = False
+
+        # Connection retry policy
+        self._connect_retry_count = max(0, int(connect_retries))
+        self._connect_retry_delay = max(0.0, float(retry_delay))
         
         # Performance tracking
         self._read_times: List[float] = []
@@ -617,12 +623,25 @@ class HalInterface:
         """Connect to LinuxCNC HAL."""
         with self._lock:
             self._state = ConnectionState.CONNECTING
-            self._connect_attempts += 1
 
-            # First, verify halcmd can actually talk to HAL
+            # First, verify halcmd can actually talk to HAL with optional retries
             # This is the primary interface - Python modules are optional
-            if not self._verify_halcmd_connection():
+            verification_attempts = self._connect_retry_count + 1
+            for attempt in range(verification_attempts):
+                self._connect_attempts += 1
+                if self._verify_halcmd_connection():
+                    break
+
                 self._last_error = "halcmd cannot communicate with HAL (is LinuxCNC running?)"
+                logger.warning(
+                    "halcmd verification failed (attempt %s/%s)",
+                    attempt + 1,
+                    verification_attempts,
+                )
+
+                if attempt < verification_attempts - 1 and self._connect_retry_delay > 0:
+                    time.sleep(self._connect_retry_delay)
+            else:
                 logger.error(self._last_error)
                 self._state = ConnectionState.ERROR
                 # Fall back to mock mode
