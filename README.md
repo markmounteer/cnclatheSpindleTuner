@@ -1,8 +1,20 @@
 # Spindle Tuner v6.0
 
+[![CI](https://github.com/markmounteer/cnclatheSpindleTuner/actions/workflows/python-app.yml/badge.svg)](https://github.com/markmounteer/cnclatheSpindleTuner/actions/workflows/python-app.yml)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![LinuxCNC 2.8+](https://img.shields.io/badge/LinuxCNC-2.8+-green.svg)](https://linuxcnc.org/)
+
 A comprehensive spindle PID tuning companion application for LinuxCNC, specifically designed for the Grizzly 7x14 CNC lathe conversion with closed-loop spindle control.
 
-Based on **Spindle PID Tuning Guide v5.3**.
+Based on **[Spindle PID Tuning Guide v5.3](SPINDLE_PID_TUNING_GUIDE_v5.3.md)**.
+
+## Highlights
+
+- **Real-time dashboard** with live RPM gauges, status indicators, and multi-trace plotting
+- **Automated test procedures** for step response, load recovery, encoder verification, and more
+- **Interactive troubleshooter** with decision trees for diagnosing common issues
+- **Mock mode** for training and testing without hardware
+- **Profile management** for saving/loading tuning configurations
 
 ---
 
@@ -18,6 +30,7 @@ Based on **Spindle PID Tuning Guide v5.3**.
 - [Troubleshooting Quick Reference](#troubleshooting-quick-reference)
 - [Architecture](#architecture)
 - [Safety Warnings](#safety-warnings)
+- [Development](#development)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -78,9 +91,15 @@ Decision tree based on Guide §14.4 with color-coded severity:
 
 | Requirement | Version | Notes |
 |-------------|---------|-------|
-| Python | 3.8+ | Standard library includes tkinter |
+| Python | 3.8+ | With tkinter (usually included) |
 | LinuxCNC | 2.8+ | For real HAL connection |
 | matplotlib | Optional | Required for real-time plotting |
+
+On Debian/Ubuntu systems, ensure tkinter is installed:
+
+```bash
+sudo apt-get install python3-tk
+```
 
 ### Hardware (for target system)
 
@@ -90,6 +109,8 @@ Decision tree based on Guide §14.4 with color-coded severity:
 | VFD | XSY-AT1 | 0-10V analog control |
 | Encoder | ABILKEEN 1024 PPR | 4096 counts/rev, differential |
 | Controller | Mesa 7i76E | Analog output + encoder input |
+
+> **Note**: The application can run in mock mode without any hardware for training purposes.
 
 ---
 
@@ -143,6 +164,19 @@ Run connected to LinuxCNC:
 
 ```bash
 python main.py
+```
+
+### Command-Line Options
+
+| Option | Description |
+|--------|-------------|
+| `--mock` | Run in mock mode without HAL connection |
+
+Example:
+
+```bash
+python main.py          # Real mode (requires LinuxCNC)
+python main.py --mock   # Mock mode (no hardware required)
 ```
 
 ---
@@ -277,16 +311,25 @@ See the **Troubleshooter** tab for detailed decision trees.
 
 ```
 cnclatheSpindleTuner/
-├── main.py             # Application entry point, UI wiring, update loop
-├── config.py           # Constants, HAL pins, baseline parameters, presets
-├── hal_interface.py    # HAL interface, mock mode simulation, INI handling
-├── logger.py           # Data recording, metrics, CSV export
-├── dashboard.py        # Dashboard tab: gauges, plot, parameter sliders
-├── tests/              # Tests tab: automated procedures, checklists tab
-├── troubleshooter.py   # Troubleshooter tab: symptom decision tree
-├── export.py           # Export tab: profiles, CSV export, INI generation
-├── README.md           # This file
-└── CHANGELOG.md        # Version history and bug fixes
+├── main.py                 # Application entry point, UI wiring, update loop
+├── config.py               # Constants, HAL pins, baseline parameters, presets
+├── hal_interface.py        # HAL interface, mock mode simulation, INI handling
+├── logger.py               # Data recording, metrics, CSV export
+├── dashboard.py            # Dashboard tab: gauges, plot, parameter sliders
+├── troubleshooter.py       # Troubleshooter tab: symptom decision tree
+├── export.py               # Export tab: profiles, CSV export, INI generation
+├── tests/                  # Tests tab module
+│   ├── tests_tab.py        # Main tests tab UI
+│   ├── checklists_tab.py   # Hardware verification checklists
+│   ├── base.py             # Base test class
+│   └── test_*.py           # Individual test implementations
+├── tests_pytest/           # Pytest-based unit tests
+│   ├── conftest.py         # Test fixtures
+│   └── test_*.py           # Unit test files
+├── test_smoke.py           # CI smoke tests
+├── SPINDLE_PID_TUNING_GUIDE_v5.3.md  # Complete tuning reference
+├── CHANGELOG.md            # Version history and bug fixes
+└── README.md               # This file
 ```
 
 ### Module Responsibilities
@@ -318,17 +361,52 @@ cnclatheSpindleTuner/
 
 ---
 
-## Testing
+## Development
+
+### Running Tests
 
 Lightweight pytest-based checks live in `tests_pytest/` alongside the application-specific test classes in `tests/`.
 
-Run the fast validation suite locally with:
-
 ```bash
+# Run the fast validation suite
 pytest
+
+# Run with verbose output
+pytest -v
+
+# Run only smoke tests (used in CI)
+pytest test_smoke.py -v
 ```
 
-The tests exercise importability, configuration sanity (baseline/preset ranges, pin mapping uniqueness), and key HAL helper behaviors in mock mode.
+The tests exercise:
+- Module importability
+- Configuration sanity (baseline/preset ranges, pin mapping uniqueness)
+- HAL helper behaviors in mock mode
+
+### Code Quality
+
+The project uses flake8 for linting:
+
+```bash
+# Check for syntax errors and undefined names
+flake8 . --select=E9,F63,F7,F82 --show-source
+
+# Full lint check
+flake8 . --max-line-length=127
+```
+
+### Mock Mode Development
+
+Mock mode provides a realistic simulation environment for development:
+
+```bash
+python main.py --mock
+```
+
+Features available in mock mode:
+- Physics simulation (VFD delay, motor slip, thermal drift)
+- Fault injection buttons (encoder fault, polarity reversed, DPLL disabled)
+- Full UI functionality without hardware
 
 ---
 
@@ -338,11 +416,27 @@ Contributions and suggestions welcome. The modular architecture makes it easy to
 
 | To Add | Modify |
 |--------|--------|
-| New test procedures | `tests.py` |
+| New test procedures | `tests/test_*.py` (create new file based on `tests/base.py`) |
 | Troubleshooter entries | `config.py` → `SYMPTOM_DIAGNOSIS` |
 | HAL pins | `config.py` → `MONITOR_PINS`, `TUNING_PARAMS` |
 | Presets | `config.py` → `PRESETS` |
 | Hardware specs | `config.py` → `*_SPECS` dictionaries |
+
+### Development Workflow
+
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/my-feature`
+3. Make changes and run tests: `pytest`
+4. Commit with descriptive messages
+5. Push and create a pull request
+
+---
+
+## Acknowledgments
+
+- Based on the [Spindle PID Tuning Guide v5.3](SPINDLE_PID_TUNING_GUIDE_v5.3.md)
+- Designed for the Grizzly 7x14 CNC lathe conversion community
+- See [CHANGELOG.md](CHANGELOG.md) for version history
 
 ---
 
