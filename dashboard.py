@@ -966,6 +966,7 @@ class DashboardTab:
         """Handle slider change."""
         try:
             val = self._snap_param(param_name, float(value))
+            self.param_vars[param_name].set(val)
             if param_name in self.param_labels:
                 self.param_labels[param_name].config(text=f"{val:.2f}")
             
@@ -1010,7 +1011,10 @@ class DashboardTab:
                 self.param_vars[param].set(value)
                 if param in self.param_labels:
                     self.param_labels[param].config(text=f"{value:.2f}")
-                self.hal.set_param(param, value)
+                if self.live_apply.get():
+                    self.hal.set_param(param, value)
+                elif self.on_param_change:
+                    self.on_param_change(param, value)
         self._show_status_message(f"Applied '{preset_name}' preset")
     
     def apply_all_params(self):
