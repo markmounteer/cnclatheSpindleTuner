@@ -297,14 +297,19 @@ class MockPhysicsEngine:
         
         current_rpm = max(0, min(self.physics.max_rpm, current_rpm))
         self.state.rpm = current_rpm
+
+        # Measurement before filtering (clamped to avoid negative/invalid readings)
+        measured_rpm = max(0.0, min(self.physics.max_rpm, current_rpm + noise))
         
         # Low-pass filter on feedback (simulates actual filtering in HAL)
         # Use params (user-adjustable) with physics default as fallback
         # Clamp to valid range [0.1, 1.0] to prevent filter freezing (0 = no update)
         filter_gain = params.get('FilterGain', self.physics.filter_gain)
         filter_gain = max(0.1, min(1.0, filter_gain))
-        self.state.rpm_filtered = (self.state.rpm_filtered * (1 - filter_gain) +
-                                   (current_rpm + noise) * filter_gain)
+        self.state.rpm_filtered = (
+            self.state.rpm_filtered * (1 - filter_gain)
+            + measured_rpm * filter_gain
+        )
 
         # === REVOLUTIONS TRACKING ===
         rps = current_rpm / 60.0
@@ -327,6 +332,7 @@ class MockPhysicsEngine:
         polarity_mult = -1 if self.state.polarity_reversed else 1
         filtered_rpm = self.state.rpm_filtered
         signed_rpm = filtered_rpm * dir_mult * polarity_mult
+        signed_rpm_raw = measured_rpm * dir_mult * polarity_mult
         abs_rpm = abs(signed_rpm)
         encoder_scale = -4096 if self.state.polarity_reversed else 4096
         signed_cmd_raw = target * command_dir
@@ -349,7 +355,7 @@ class MockPhysicsEngine:
 
         # Feedback path (uses filtered RPM)
         add_if_present('feedback', signed_rpm)
-        add_if_present('feedback_raw', signed_rpm)
+        add_if_present('feedback_raw', signed_rpm_raw)
         add_if_present('feedback_abs', abs_rpm)
 
         # PID internals
@@ -653,6 +659,10 @@ class HalInterface:
         Returns:
             Pin value as float
         """
+        if not pin_name:
+            logger.warning("Empty pin name provided to get_pin_value")
+            return 0.0
+
         with self._lock:
             # Check cache
             if use_cache and pin_name in self._cache:
@@ -687,10 +697,11 @@ class HalInterface:
         if not self._physics_engine:
             return
 
-        now = time.monotonic()
-        if (now - self._mock_last_update_mono) >= self._mock_update_interval:
+        update_start = time.monotonic()
+        if (update_start - self._mock_last_update_mono) >= self._mock_update_interval:
             self._mock_values = self._physics_engine.update()
-            self._mock_last_update_mono = now
+            # Use the captured timestamp to avoid cadence jitter from update duration
+            self._mock_last_update_mono = update_start
     
     @staticmethod
     def _parse_hal_value(text: str) -> float:
@@ -797,6 +808,11 @@ class HalInterface:
             )
             for pin in pin_list:
                 values[pin] = self._read_hal_pin(pin)
+            if values:
+                with self._lock:
+                    now = time.monotonic()
+                    for pin, val in values.items():
+                        self._cache[pin] = CachedValue(val, now)
             return values
 
         # Log stderr if present (may contain warnings) but continue if
@@ -810,6 +826,11 @@ class HalInterface:
             logger.error(f"Failed to parse bulk HAL output: {e}; falling back to individual reads")
             for pin in pin_list:
                 values[pin] = self._read_hal_pin(pin)
+            if values:
+                with self._lock:
+                    now = time.monotonic()
+                    for pin, val in values.items():
+                        self._cache[pin] = CachedValue(val, now)
             return values
 
         for pin, parsed in zip(pin_list, parsed_values):
@@ -954,6 +975,10 @@ class HalInterface:
             logger.error(f"Invalid value type for {param_name}: {value}")
             return False
 
+        if math.isnan(value) or math.isinf(value):
+            logger.error(f"Non-finite value for {param_name}: {value}")
+            return False
+
         # Validate and snap to range/step
         min_val, max_val, step = self._get_param_bounds(param_name)
         original_value = value
@@ -1043,6 +1068,10 @@ class HalInterface:
                         logger.error(f"Invalid value type for {name}: {value}")
                         continue
 
+                    if math.isnan(numeric_value) or math.isinf(numeric_value):
+                        logger.error(f"Non-finite value for {name}: {numeric_value}")
+                        continue
+
                     min_val, max_val, step = self._get_param_bounds(name)
                     clamped_value = self._clamp_and_snap(numeric_value, min_val, max_val, step)
                     self._mock_state.params[name] = clamped_value
@@ -1070,6 +1099,10 @@ class HalInterface:
                     value = float(value)
                 except (TypeError, ValueError):
                     logger.error(f"Invalid value type for {param_name}: {value}")
+                    continue
+
+                if math.isnan(value) or math.isinf(value):
+                    logger.error(f"Non-finite value for {param_name}: {value}")
                     continue
 
                 value = self._clamp_and_snap(value, min_val, max_val, step)
