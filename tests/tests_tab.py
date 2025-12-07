@@ -100,6 +100,10 @@ class TestsTab:
         self.load_label: Optional[ttk.Label] = None
         self.mock_buttons: Dict[str, ttk.Button] = {}
 
+        # Track inner notebooks and their test keys for "Run Test" button
+        self.inner_notebooks: Dict[int, ttk.Notebook] = {}
+        self.test_key_map: Dict[int, Dict[int, str]] = {}
+
         self._setup_ui()
         self._create_test_instances()
 
@@ -117,7 +121,7 @@ class TestsTab:
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
         # Create tabs for each category
-        for category_name, tests in self.TEST_CATEGORIES:
+        for cat_idx, (category_name, tests) in enumerate(self.TEST_CATEGORIES):
             category_frame = ttk.Frame(self.notebook)
             self.notebook.add(category_frame, text=category_name)
 
@@ -125,10 +129,16 @@ class TestsTab:
             inner_notebook = ttk.Notebook(category_frame)
             inner_notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-            for test_name, test_class, test_key in tests:
+            # Store reference to inner notebook
+            self.inner_notebooks[cat_idx] = inner_notebook
+            self.test_key_map[cat_idx] = {}
+
+            for test_idx, (test_name, test_class, test_key) in enumerate(tests):
                 test_frame = ttk.Frame(inner_notebook)
                 inner_notebook.add(test_frame, text=test_name)
                 self._setup_test_tab(test_frame, test_class, test_key)
+                # Map test index to test key
+                self.test_key_map[cat_idx][test_idx] = test_key
 
         # Progress and results area (shared)
         bottom_frame = ttk.Frame(self.parent)
@@ -154,6 +164,8 @@ class TestsTab:
         btn_frame = ttk.Frame(results_frame)
         btn_frame.pack(fill=tk.X)
 
+        ttk.Button(btn_frame, text="Run Test",
+                   command=self.run_selected_test).pack(side=tk.LEFT, padx=2)
         ttk.Button(btn_frame, text="Clear Results",
                    command=self.clear_results).pack(side=tk.LEFT, padx=2)
         ttk.Button(btn_frame, text="Abort Test",
@@ -376,6 +388,28 @@ class TestsTab:
                 "forward": self.tests.get("forward"),
                 "step": self.tests.get("step"),
             })
+
+    def run_selected_test(self):
+        """Run the currently selected test based on active tabs."""
+        # Get the currently selected category tab
+        cat_idx = self.notebook.index(self.notebook.select())
+
+        # Get the inner notebook for this category
+        inner_notebook = self.inner_notebooks.get(cat_idx)
+        if inner_notebook is None:
+            self.log_result("Error: Could not determine selected test category")
+            return
+
+        # Get the currently selected test tab within this category
+        test_idx = inner_notebook.index(inner_notebook.select())
+
+        # Get the test key
+        test_key = self.test_key_map.get(cat_idx, {}).get(test_idx)
+        if test_key is None:
+            self.log_result("Error: Could not determine selected test")
+            return
+
+        self._run_test(test_key)
 
     def _run_test(self, test_key: str):
         """Run a specific test."""
