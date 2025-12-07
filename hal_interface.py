@@ -453,6 +453,7 @@ class HalInterface:
         self._lock = threading.RLock()
         self._cache: Dict[str, CachedValue] = {}
         self._validated_pins: set = set()
+        self._missing_pins: set = set()  # Pins confirmed to not exist (avoid repeated warnings)
         self._pin_access_mode: Dict[str, str] = {}
         
         # Connection state
@@ -682,6 +683,8 @@ class HalInterface:
         """Attempt to reconnect to HAL."""
         if self._state == ConnectionState.MOCK and self._forced_mock:
             return False
+        # Clear missing pins cache so we retry all pins after reconnection
+        self.clear_missing_pins()
         return self._connect()
     
     def get_diagnostics(self) -> Dict[str, Any]:
@@ -699,6 +702,7 @@ class HalInterface:
                 'last_error': self._last_error,
                 'cache_size': len(self._cache),
                 'validated_pins': len(self._validated_pins),
+                'missing_pins': list(self._missing_pins),
             }
     
     # -------------------------------------------------------------------------
@@ -793,21 +797,28 @@ class HalInterface:
 
     def _read_hal_pin(self, pin_name: str) -> Tuple[float, bool]:
         """Read pin or signal value from real HAL."""
+        # Skip pins that are known to not exist (already warned once)
+        with self._lock:
+            if pin_name in self._missing_pins:
+                return 0.0, False
+
         cached_accessor = self._get_cached_accessor(pin_name)
         accessors = [cached_accessor] if cached_accessor else []
         accessors.extend([cmd for cmd in ('getp', 'gets') if cmd not in accessors])
 
+        all_failed = True
         for cmd in accessors:
             try:
                 result = self._run_halcmd(['-s', cmd, pin_name], timeout=1.0)
 
                 if result.returncode != 0:
-                    logger.warning(f"halcmd {cmd} error for {pin_name}: {result.stderr}")
+                    # Don't log here - we'll log once if all accessors fail
                     continue
 
                 value = self._parse_hal_value(result.stdout)
                 with self._lock:
                     self._pin_access_mode[pin_name] = cmd
+                all_failed = False
                 return value, True
 
             except subprocess.TimeoutExpired:
@@ -819,6 +830,15 @@ class HalInterface:
             except Exception as e:
                 logger.error(f"Error reading {pin_name}: {e}")
                 continue
+
+        # If all accessors failed, mark this pin as missing to avoid future warnings
+        if all_failed:
+            with self._lock:
+                if pin_name not in self._missing_pins:
+                    self._missing_pins.add(pin_name)
+                    logger.warning(
+                        f"HAL pin/signal '{pin_name}' not found - will skip in future polls"
+                    )
 
         return 0.0, False
 
@@ -835,8 +855,9 @@ class HalInterface:
 
         values: Dict[str, float] = {}
 
-        # Deduplicate while preserving order
-        pin_list = list(dict.fromkeys(pin_names))
+        # Deduplicate while preserving order, and filter out known-missing pins
+        with self._lock:
+            pin_list = [p for p in dict.fromkeys(pin_names) if p not in self._missing_pins]
 
         # Resolve accessors for unknown pins up front so signals don't get stuck
         # behind repeated getp failures in bulk mode.
@@ -852,6 +873,11 @@ class HalInterface:
             if ok:
                 values[pin] = val
                 continue
+
+            # If _read_hal_pin failed and marked the pin as missing, skip it
+            with self._lock:
+                if pin in self._missing_pins:
+                    continue
 
             # Still unknown: fall back to getp for bulk attempt; we'll retry
             # individually if it fails.
@@ -1410,14 +1436,27 @@ class HalInterface:
         """Clear the value cache."""
         with self._lock:
             self._cache.clear()
-    
+
+    def clear_missing_pins(self):
+        """
+        Clear the set of known-missing pins.
+
+        Call this after reconfiguring HAL to allow the interface to retry
+        reading pins that previously failed.
+        """
+        with self._lock:
+            count = len(self._missing_pins)
+            self._missing_pins.clear()
+        if count:
+            logger.info(f"Cleared {count} missing pin(s) from cache - will retry on next poll")
+
     def validate_pin(self, pin_name: str) -> bool:
         """
         Check if a pin exists in HAL.
-        
+
         Args:
             pin_name: Full pin name
-            
+
         Returns:
             True if pin exists
         """
@@ -1427,6 +1466,8 @@ class HalInterface:
         with self._lock:
             if pin_name in self._validated_pins:
                 return True
+            if pin_name in self._missing_pins:
+                return False
 
         try:
             cached_accessor = self._get_cached_accessor(pin_name)
