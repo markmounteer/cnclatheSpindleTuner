@@ -940,12 +940,12 @@ class DashboardTab:
 
         # Update RPM bar visualization
         if hasattr(self, 'fallback_bar_canvas'):
-            self._update_fallback_bars(cmd, feedback)
+            self._update_fallback_bars(cmd, fb)
 
         # Add data point to chart history
         self.fallback_chart_data.append({
             'cmd': cmd,
-            'feedback': feedback,
+            'feedback': fb,
             'error': err,
             'time': time.time()
         })

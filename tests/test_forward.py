@@ -5,6 +5,7 @@ Verifies forward (M3) spindle operation with PID active.
 Checks for target accuracy, stability (jitter), and at-speed signal.
 """
 
+import statistics
 import time
 
 from config import MONITOR_PINS
